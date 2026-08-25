@@ -38,7 +38,7 @@ cargo run -- keygen
 docker run -d --name dondude-pg -e POSTGRES_PASSWORD=dondude \
     -e POSTGRES_USER=dondude -e POSTGRES_DB=dondude -p 55432:5432 postgres:17-alpine
 TEST_DATABASE_URL=postgres://dondude:dondude@127.0.0.1:55432/dondude \
-    cargo test --test database
+    cargo test --test database --test web
 
 # The whole stack:
 docker compose build && docker compose up -d
@@ -189,8 +189,11 @@ into a format string prints every cause twice.
   `/api/runs/{id}`. There is no JS build step; do not add one for a form.
 * **Flash messages are fixed codes** (`?ok=saved`), never free text, so nothing
   user-supplied is reflected into a page. Failed form posts re-render with the
-  submitted values instead of redirecting, so an operator does not retype
-  everything to fix a typo.
+  **submitted** values, never with the stored ones — rendering stored state after
+  a failed or side-band submit silently discards what the operator typed, and the
+  next save then writes nothing. That bug has been shipped twice here (the device
+  create form and the settings connection test); `tests/web.rs` exists to catch
+  the third.
 * **Path safety**: device and tenant names come from a web form and become file
   paths. `config::slugify` flattens them and must never yield `.`, `..` or an
   empty component; `BackupRepo::resolve` rejects escapes as defence in depth.

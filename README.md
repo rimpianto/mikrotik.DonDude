@@ -98,12 +98,12 @@ rather than forking it, so several installations can share one backup repository
 A dedicated read-only account is enough:
 
 ```
-/user group add name=backup policy=ssh,read,test
+/user group add name=backup policy=ssh,read
 /user add name=dondude-backup group=backup password="..." address=10.0.0.0/24
 ```
 
-Add `sensitive` to the group's policy only if you turn on *include secrets in
-exports* — which is off by default, because those values would be committed to
+`ssh` is needed to log in and `read` to read the configuration; nothing else is
+required. Add `sensitive` only if you turn on *include secrets in exports* — which is off by default, because those values would be committed to
 Git in clear text and the repository is a softer target than the routers.
 
 Host keys are verified with an `accept-new` policy by default: the key is
@@ -182,7 +182,7 @@ dondude serve
 
 ```sh
 cargo test                     # unit and integration tests; no router, database or network needed
-TEST_DATABASE_URL=postgres://... cargo test --test database   # adds the SQL layer
+TEST_DATABASE_URL=postgres://... cargo test          # adds the SQL and HTTP layers
 ```
 
 Device behaviour is covered with canned `/export` text, and push/fetch against a

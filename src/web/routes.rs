@@ -749,48 +749,63 @@ pub async fn save_settings(
     }
 }
 
-/// Check the remote without saving: fetch from it with the *submitted*
-/// credentials, so a token can be verified before it is stored.
+/// Save the submitted settings, then check the remote with them.
+///
+/// This used to test *without* saving, and re-rendered the page from stored
+/// settings — so an operator who typed a URL, pressed the button and then
+/// pressed Save wrote an empty URL, because the field had silently reverted.
+/// Saving first removes that trap: whatever is on screen is what was stored and
+/// what was tested.
 pub async fn test_remote(
     State(state): State<AppState>,
     Operator(user): Operator,
     Form(form): Form<SettingsForm>,
 ) -> Result {
-    let stored = state.db.settings().await?;
-    let url = form.remote_url.trim().to_string();
-    if url.is_empty() {
+    let repo_path = state.repo_path.display().to_string();
+
+    if let Err(error) = state.db.update_settings(&form.to_input()).await {
+        let stored = state.db.settings().await?;
         return Ok(page(views::settings(
             &user,
             &stored,
-            &state.repo_path.display().to_string(),
+            &repo_path,
             None,
-            Some("Enter a repository URL first."),
+            Some(&crate::error::chain(&error)),
         )));
     }
 
-    // An empty token field means "use the stored one", matching the save path.
-    let token = match form.git_token.trim() {
-        "" => state.db.git_token().await?,
-        token => Some(token.to_string()),
+    let stored = state.db.settings().await?;
+    let Some(url) = stored.remote_url.clone() else {
+        return Ok(page(views::settings(
+            &user,
+            &stored,
+            &repo_path,
+            Some("Settings saved. No repository URL to test."),
+            None,
+        )));
     };
 
+    let token = state.db.git_token().await?;
     let outcome = state
         .probe_remote(
             &url,
-            &form.remote_branch,
-            &form.git_username,
+            &stored.remote_branch,
+            &stored.git_username,
             token.as_deref(),
         )
         .await;
 
     let (flash, error) = match outcome {
-        Ok(message) => (Some(message), None),
-        Err(error) => (None, Some(crate::error::chain(&error))),
+        Ok(message) => (Some(format!("Settings saved. {message}")), None),
+        Err(error) => (
+            Some("Settings saved, but the connection test failed.".to_string()),
+            Some(crate::error::chain(&error)),
+        ),
     };
     Ok(page(views::settings(
         &user,
         &stored,
-        &state.repo_path.display().to_string(),
+        &repo_path,
         flash.as_deref(),
         error.as_deref(),
     )))

@@ -906,9 +906,11 @@ pub fn settings(
                     }
                     div.actions {
                         button type="submit" formaction="/settings/test" formnovalidate {
-                            "Test connection"
+                            "Save and test connection"
                         }
-                        span.hint { "Saves nothing; just checks the URL and token." }
+                        span.hint {
+                            "Stores these settings, then connects to check the URL and token."
+                        }
                     }
                 }
 
