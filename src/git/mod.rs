@@ -326,13 +326,31 @@ impl BackupRepo {
             return Ok(Synced::LocalAhead);
         }
         if !self.repo.graph_descendant_of(remote_oid, local_oid)? {
-            return Err(Error::config(format!(
-                "backup repository {} has diverged from {}/{}; resolve it with git before \
-                 running again",
-                self.path.display(),
-                remote_config.name,
-                self.branch
-            )));
+            // Two shapes of trouble that need different fixes, so they get
+            // different messages. Unrelated histories are the common one: the
+            // operator ran a backup before configuring the remote, and the
+            // remote already had a commit of its own (a README, typically).
+            let path = self.path.display();
+            let (remote_name, branch) = (&remote_config.name, &self.branch);
+            let unrelated = self.repo.merge_base(local_oid, remote_oid).is_err();
+
+            return Err(Error::config(if unrelated {
+                format!(
+                    "the backup repository {path} and {remote_name}/{branch} have unrelated \
+                     histories — neither contains the other's commits. This usually means \
+                     backups were committed locally before the remote was configured, and the \
+                     remote already had a commit of its own. Either keep the local history \
+                     with `git -C {path} rebase --onto {remote_name}/{branch} --root`, or \
+                     adopt the remote and let the next run re-capture with `git -C {path} \
+                     fetch {remote_name} && git -C {path} reset --hard {remote_name}/{branch}`"
+                )
+            } else {
+                format!(
+                    "the backup repository {path} has diverged from {remote_name}/{branch}: \
+                     both gained commits since they last agreed. Reconcile them with git — \
+                     `git -C {path} pull --rebase {remote_name} {branch}` — then run again"
+                )
+            }));
         }
 
         // Fast-forward. Only safe with a clean tree, so check first.

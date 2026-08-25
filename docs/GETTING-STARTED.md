@@ -1,0 +1,240 @@
+# Getting started
+
+From nothing to a router backed up on GitHub. Allow about twenty minutes, most
+of it waiting for the first Docker build.
+
+Everything here is done once. After it, backups happen on their own.
+
+---
+
+## Before you start
+
+You need:
+
+* a machine with Docker and Docker Compose
+* a MikroTik device reachable over SSH from that machine
+* a GitHub account
+
+---
+
+## 1. Get DonDude running
+
+```sh
+git clone https://github.com/rimpianto/mikrotik.DonDude.git
+cd mikrotik.DonDude
+cp .env.example .env
+```
+
+Open `.env` and set `POSTGRES_PASSWORD` to any strong random string. It is only
+used between the two containers, so you will never type it again.
+
+Build the image. The first build compiles libgit2, libssh2 and OpenSSL from
+source and takes several minutes; later builds are fast.
+
+```sh
+docker compose build
+```
+
+Now generate the key that encrypts stored credentials, and put it in `.env`:
+
+```sh
+docker compose run --rm --no-deps app keygen
+```
+
+Copy the line it prints into `DONDUDE_MASTER_KEY=` in `.env`.
+
+> **Keep a copy of this key somewhere safe** — a password manager, not only the
+> server. It decrypts every router password and the GitHub token. Without it
+> those are unrecoverable and every device has to be given its password again.
+> A database backup and this key stored in the same place defeats half the point
+> of encrypting them.
+
+Start it:
+
+```sh
+docker compose up -d
+docker compose logs -f app          # Ctrl-C to stop watching
+```
+
+You should see `DonDude is listening on http://0.0.0.0:8080`. The database
+schema is applied automatically.
+
+Open <http://localhost:8080>. It asks you to create the administrator account —
+username, and a password of at least 8 characters. That account is stored
+hashed with Argon2id; there is no recovery link, but you can reset it from the
+command line later.
+
+---
+
+## 2. Create a user on the router
+
+DonDude only ever reads. Give it an account that can do nothing else:
+
+```
+/user group add name=backup policy=ssh,read
+/user add name=dondude-backup group=backup password="pick-something-long" \
+    address=192.168.1.0/24
+```
+
+`ssh` lets it log in, `read` lets it read the configuration. Nothing else is
+needed — not `write`, not `test`.
+
+Set `address=` to the network DonDude runs on, so the account is useless from
+anywhere else.
+
+Check that SSH is enabled:
+
+```
+/ip service print
+```
+
+`ssh` must not be `disabled`.
+
+> Add `sensitive` to the group's policy **only** if you later turn on *include
+> secrets in exports*. That setting writes PSKs, PPP passwords and SNMP
+> communities into Git in clear text, and is off by default for that reason.
+
+---
+
+## 3. Add the router in DonDude
+
+**Devices → Add device**
+
+| Field | What to put |
+|---|---|
+| Name | Short and stable, e.g. `core-rtr-01`. It becomes the file name in Git, so renaming it later moves its history. |
+| Host or IP | How DonDude reaches it |
+| SSH port | 22 unless you changed it |
+| SSH username | `dondude-backup` |
+| Tenant | A grouping, e.g. a customer or site. Becomes a folder in the repository. `default` is fine. |
+| Tags | Optional labels for backing up part of the fleet, e.g. `core, milan` |
+| Method | Password |
+| Password | The one you just set on the router |
+
+Save, then press **Test connection**.
+
+A green banner like `Connected: RB5009UG+S+, RouterOS 7.14.3` means credentials
+and reachability are fine. The device's host key is recorded now, on this first
+connection, and a later change will be refused — that is the `accept-new` policy,
+the same one OpenSSH uses.
+
+If it fails, the message says why. The table at the end of
+[MANUAL.md](MANUAL.md) lists what each one means.
+
+---
+
+## 4. Set up the GitHub repository
+
+Do this **before the first backup**. Backing up locally first and adding the
+repository afterwards leaves two unrelated histories that need a git command to
+untangle.
+
+**On GitHub:** create a new repository, **private** — it will describe your
+network. Empty is cleanest, but one initialised with a README works too.
+
+**The token:** *Settings → Developer settings → Personal access tokens →
+Fine-grained tokens → Generate new token*
+
+* **Repository access**: `Only select repositories` → the backup repository only
+* **Permissions → Repository permissions → Contents: Read and write**
+
+GitHub adds *Metadata: Read-only* by itself; that is expected. Nothing else is
+needed.
+
+A classic token would need the `repo` scope, which grants access to *all* your
+repositories. Prefer the fine-grained one.
+
+**In DonDude — Settings:**
+
+* **Repository URL**: the HTTPS URL, e.g.
+  `https://github.com/you/mikrotik-backups.git`
+* **Branch**: `main`
+* **Username**: leave `x-access-token` — GitHub ignores it when the password is
+  a token
+* **Access token**: paste it
+
+Press **Save and test connection**. Expect one of:
+
+```
+Settings saved. Connected. The repository is empty; the first push will create `main`.
+Settings saved. Connected. Branch `main` exists (1 branch(es) total).
+```
+
+The token is encrypted before it is stored and is never shown again — the field
+will say `stored — type to replace`.
+
+---
+
+## 5. The first backup
+
+From the dashboard, press **Dry run** first. It connects to every device and
+reports what *would* change, without writing, committing or pushing anything.
+Nothing can go wrong, and you find out whether the fleet is reachable.
+
+Then press **Back up all devices now** and watch the log:
+
+```
+19:50:32 1 device(s) selected; repository /data/backups
+19:50:32 remote: the remote branch does not exist yet
+19:50:34 core-rtr-01: committed — initial, 226 lines home/core-rtr-01.rsc
+19:50:35 pushed to the backup remote
+19:50:35 1 device(s): 1 changed, 0 unchanged, 0 failed in 3.1s
+```
+
+Refresh your GitHub repository — the `.rsc` file is there.
+
+### The test that proves it works
+
+Press **Back up all devices now** again, straight away.
+
+It must report **unchanged**, and create **no** new commit.
+
+That is the whole point of the design. A raw `/export` starts with a banner
+carrying the router's own clock, so committing it as-is would produce a diff for
+every device on every run and the history would tell you nothing. DonDude
+rewrites that banner without the timestamp — while keeping the firmware version,
+because an upgrade *is* a real change.
+
+If you see a second commit instead, something volatile is reaching the stored
+file. That is a bug worth reporting.
+
+---
+
+## 6. Make it automatic
+
+**Settings → Schedule** → tick *Back up automatically every day* and pick a time.
+
+Times are **UTC**, deliberately: a scheduled run does not shift twice a year
+with daylight saving.
+
+That is it. Nothing else to set up — no cron, no systemd timer.
+
+---
+
+## Where to go next
+
+* [MANUAL.md](MANUAL.md) — every screen and setting, the command line, and what
+  to do when something fails
+* [ARCHITECTURE.md](ARCHITECTURE.md) — how it works inside, and the invariants
+  to respect when changing it
+
+## Before you expose it to the internet
+
+The interface holds the passwords to your routers. If it will be reachable from
+outside a trusted network:
+
+* Put TLS in front of it and redirect HTTP to HTTPS. Session cookies are not
+  marked `Secure`, because DonDude is commonly used over plain HTTP on a
+  management LAN and a `Secure` cookie would silently never be sent, making
+  sign-in look broken. Behind a TLS-only proxy that is fine; over mixed HTTP it
+  is not.
+* Leave the compose port binding as `127.0.0.1:8080:8080` and let the proxy
+  reach it locally, rather than publishing the port on every interface.
+
+With Caddy that is three lines and you get certificates automatically:
+
+```
+dondude.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```

@@ -867,6 +867,14 @@ pub fn settings(
                             " repository on GitHub and paste its HTTPS URL. \
                              Leave empty to keep backups on this machine only."
                         }
+                        div.hint {
+                            "Set this up "
+                            strong { "before the first backup" }
+                            " if you can. Committing locally first and adding the \
+                             repository afterwards leaves two histories that cannot be \
+                             merged automatically, which then needs a git command to \
+                             untangle."
+                        }
                     }
                     div.row {
                         label {

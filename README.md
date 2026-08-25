@@ -29,6 +29,11 @@ docker compose up -d
 
 Then open <http://localhost:8080> and create the administrator account.
 
+**New here?** [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) walks through
+the whole thing — router account, GitHub token, first backup — in about twenty
+minutes. [docs/MANUAL.md](docs/MANUAL.md) is the reference for every screen,
+setting and error message.
+
 The database schema is applied automatically on start-up. Nothing else is
 needed: add a router in **Devices**, point **Settings** at a GitHub repository,
 and press **Back up all devices now**.
@@ -190,8 +195,13 @@ local bare repository created by the test. The PostgreSQL test is skipped unless
 `TEST_DATABASE_URL` is set — and it **truncates every table**, so point it at a
 throwaway database.
 
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers the invariants worth knowing
-before changing the engine.
+## Documentation
+
+| | |
+|---|---|
+| [GETTING-STARTED.md](docs/GETTING-STARTED.md) | From nothing to a router backed up on GitHub |
+| [MANUAL.md](docs/MANUAL.md) | Every screen and setting, the command line, troubleshooting |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it works inside, and the invariants to respect when changing it |
 
 ## Licence
 
