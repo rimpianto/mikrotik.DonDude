@@ -1,2 +1,2 @@
 # mikrotik.DonDude
-Platform for managing RouterOS devices 
+Platform for managing mikrotik RouterOS devices 
