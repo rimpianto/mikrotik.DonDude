@@ -1,0 +1,10 @@
+target
+.git
+.github
+*.md
+!README.md
+docker-compose.yml
+Dockerfile
+.env
+.env.example
+tests

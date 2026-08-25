@@ -1,0 +1,56 @@
+# DonDude — RouterOS fleet backups with a web interface.
+#
+#   1. cp .env.example .env
+#   2. docker compose run --rm --no-deps app keygen   # paste into .env
+#   3. docker compose up -d
+#   4. open http://localhost:8080 and create the administrator account
+#
+# The schema is applied automatically on start-up.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dondude
+      POSTGRES_DB: dondude
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The app cannot migrate against a database that is still starting up.
+      test: ["CMD-SHELL", "pg_isready -U dondude -d dondude"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://dondude:${POSTGRES_PASSWORD}@db:5432/dondude
+      # Decrypts every stored credential. Generate with:
+      #   docker compose run --rm --no-deps app keygen
+      # `?` rather than `:?`: the variable may be defined-but-empty, which is
+      # what .env looks like before `keygen` has been run. Compose would
+      # otherwise refuse to start the very command that produces the key.
+      DONDUDE_MASTER_KEY: ${DONDUDE_MASTER_KEY?copy .env.example to .env first}
+      DONDUDE_REPO_PATH: /data/backups
+      DONDUDE_BIND: 0.0.0.0:8080
+      RUST_LOG: ${RUST_LOG:-mikrotik_dondude=info,warn}
+    ports:
+      # Bound to localhost by default: the UI holds router credentials, so
+      # exposing it on 0.0.0.0 should be a deliberate act. Change to
+      # "8080:8080" once there is TLS in front of it.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Holds the backup Git working tree and known_hosts. Back this up, or rely
+      # on the GitHub remote as the real copy.
+      - backups:/data
+
+volumes:
+  pgdata:
+  backups:
