@@ -158,8 +158,19 @@ docker compose exec app dondude fleet list
 docker compose exec app dondude device test core-rtr-01
 docker compose exec app dondude backup run --dry-run
 docker compose exec app dondude backup run --tag core
-docker compose exec app dondude user add operator --password '...'
+docker compose exec app dondude settings show
 docker compose exec app dondude db check
+```
+
+Devices and the backup remote can also be provisioned from the command line, so
+a deployment can be rebuilt from a script instead of by hand:
+
+```sh
+export RTR_PASSWORD='...' GITHUB_TOKEN='github_pat_...'
+dondude settings remote --url https://github.com/you/mikrotik-backups.git \
+    --token-env GITHUB_TOKEN --push --test
+dondude fleet add --update --name core-rtr-01 --host 10.0.0.1 \
+    --user dondude-backup --tenant acme --password-env RTR_PASSWORD
 ```
 
 `backup run` exits non-zero if any device or the push failed. There is no

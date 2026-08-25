@@ -228,28 +228,149 @@ wrong; DonDude collects them and fails.
 
 The same binary, reading the same database. There is no configuration file.
 
+All examples assume Docker; drop the `docker compose exec app` prefix when
+running the binary directly.
+
+### Backups
+
 ```sh
-docker compose exec app dondude fleet list
-docker compose exec app dondude device test core-rtr-01
 docker compose exec app dondude backup run
 docker compose exec app dondude backup run --dry-run
 docker compose exec app dondude backup run --device core-rtr-01
 docker compose exec app dondude backup run --tag core --tag edge
 docker compose exec app dondude backup run --tenant acme
 docker compose exec app dondude backup run --concurrency 32 --no-push
+docker compose exec app dondude device test core-rtr-01
+```
+
+`--device` includes a device even if it is disabled. Naming one that does not
+exist is an error, not an empty run — a typo should not look like a clean night.
+
+### The fleet
+
+```sh
+docker compose exec app dondude fleet list
+docker compose exec app dondude fleet remove core-rtr-01
+docker compose exec app dondude fleet disable core-rtr-01
+docker compose exec app dondude fleet enable core-rtr-01
+```
+
+`fleet add` takes everything the web form asks for, so a fleet can be
+provisioned from a script instead of by hand:
+
+```sh
+export RTR_PASSWORD='...'
+dondude fleet add \
+    --name core-rtr-01 \
+    --host 10.0.0.1 \
+    --user dondude-backup \
+    --tenant acme \
+    --tag core --tag milan \
+    --password-env RTR_PASSWORD
+```
+
+| Flag | Notes |
+|---|---|
+| `--name --host --user` | Required |
+| `--port` | Defaults to 22 |
+| `--tenant` | Defaults to `default` |
+| `--tag` | Repeatable |
+| `--password-env VAR` | Reads the password from the environment. Preferred. |
+| `--password PW` | Convenient, but lands in your shell history. Warns when used. |
+| `--key PATH` | SSH private key, as seen from inside the container |
+| `--key-passphrase-env VAR` | Passphrase for that key |
+| `--agent` | Use a running `ssh-agent` |
+| `--disabled` | Add it, but exclude it from fleet-wide runs |
+| `--update` | Update the device if it already exists instead of failing |
+
+Exactly one credential source is needed when creating a device. With `--update`,
+omitting it leaves the stored credential alone — so a provisioning script can
+change a hostname or a tag without restating the password:
+
+```sh
+dondude fleet add --name core-rtr-01 --host 10.0.0.9 \
+    --user dondude-backup --tenant acme --update
+```
+
+`--update` is what makes such a script safe to re-run.
+
+### Settings
+
+```sh
+docker compose exec app dondude settings show
+```
+
+```sh
+export GITHUB_TOKEN='github_pat_...'
+dondude settings remote \
+    --url https://github.com/you/mikrotik-backups.git \
+    --branch main \
+    --token-env GITHUB_TOKEN \
+    --push \
+    --test
+```
+
+| Flag | Notes |
+|---|---|
+| `--url` | Repository URL. An empty string keeps backups local only. |
+| `--branch` | Defaults to whatever is already stored |
+| `--username` | Sent with the token; GitHub ignores it |
+| `--token-env VAR` | Reads the token from the environment. Preferred. |
+| `--token T` | Lands in your shell history. Warns when used. |
+| `--clear-token` | Forget the stored token |
+| `--push` / `--no-push` | Whether a run pushes |
+| `--test` | Connect to the remote afterwards and report what is there |
+
+Every flag is optional and only what is given changes; in particular, omitting
+the token keeps the stored one. `dondude settings test` checks the stored remote
+without changing anything.
+
+Capture options, the schedule and the advanced fields are only in the web
+interface — they are chosen once and rarely revisited.
+
+### Accounts
+
+```sh
 docker compose exec app dondude user list
 docker compose exec app dondude user add operator --password '...'
 docker compose exec app dondude user passwd admin --password '...'
+```
+
+Locked yourself out of the interface? `dondude user passwd` is the way back in.
+
+### Maintenance
+
+```sh
 docker compose exec app dondude db check
 docker compose exec app dondude db migrate
 docker compose exec app dondude keygen
 dondude --version
 ```
 
-`--device` includes a device even if it is disabled. Naming one that does not
-exist is an error, not an empty run — a typo should not look like a clean night.
+### Provisioning a whole deployment from a script
 
-Locked yourself out of the interface? `dondude user passwd` is the way back in.
+Put the values in a file, keep it with your other infrastructure secrets, and a
+rebuild takes one command instead of an afternoon of form-filling:
+
+```sh
+#!/bin/sh
+set -e
+export RTR_CORE01 RTR_EDGE02 GITHUB_TOKEN     # from your secret store
+
+dondude settings remote --url https://github.com/you/mikrotik-backups.git \
+    --token-env GITHUB_TOKEN --push
+
+dondude fleet add --update --name core-rtr-01 --host 10.0.0.1 \
+    --user dondude-backup --tenant acme --tag core --password-env RTR_CORE01
+dondude fleet add --update --name edge-rtr-02 --host 10.0.0.2 \
+    --user dondude-backup --tenant acme --tag edge --password-env RTR_EDGE02
+
+dondude settings test
+dondude backup run --dry-run
+```
+
+The operator account still has to be created once, in the browser or with
+`dondude user add`.
 
 ---
 
@@ -425,14 +546,23 @@ Two things matter, and they should not live in the same place:
 2. **`DONDUDE_MASTER_KEY`.** Keep it in a password manager, not only on the
    server. Without it the credentials in the database are unreadable.
 
-The database itself holds the inventory, settings and run history. Worth backing
-up for convenience, but everything in it except the credentials can be rebuilt
-by hand:
+The database holds the inventory, the settings and the run history. Snapshot it
+after any change worth not retyping:
 
 ```sh
-docker compose exec db pg_dump -U dondude dondude > dondude.sql
+docker compose exec db pg_dump -U dondude --clean --if-exists dondude > dondude-config.sql
 ```
 
-To restore on a new machine: bring up the stack with the **same**
-`DONDUDE_MASTER_KEY`, restore the dump, and let the next run fetch the backup
-repository from GitHub.
+Restoring is one command, and needs the **same** `DONDUDE_MASTER_KEY` — the
+credentials inside the dump are still encrypted:
+
+```sh
+docker compose exec -T db psql -U dondude -d dondude < dondude-config.sql
+```
+
+The alternative to a snapshot is a provisioning script — see [provisioning a
+whole deployment](#provisioning-a-whole-deployment-from-a-script). Either way,
+the point is that rebuilding the configuration should not mean typing it again.
+
+To move to a new machine: bring up the stack with the same master key, restore
+the dump, and let the next run fetch the backup repository from GitHub.

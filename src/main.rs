@@ -16,7 +16,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{ArgAction, ArgGroup, Args, Parser, Subcommand};
 
 use mikrotik_dondude::backup::{self, DeviceReport, ProgressSink, PushReport, RunOptions};
 use mikrotik_dondude::config::DeviceFilter;
@@ -81,6 +81,13 @@ enum Command {
     Fleet {
         #[command(subcommand)]
         action: FleetCommand,
+    },
+
+    /// Fleet-wide settings, including the backup remote.
+    #[command(subcommand_required = true, arg_required_else_help = true)]
+    Settings {
+        #[command(subcommand)]
+        action: SettingsCommand,
     },
 
     /// Operator accounts.
@@ -159,6 +166,133 @@ enum DeviceCommand {
 enum FleetCommand {
     /// List configured devices.
     List,
+
+    /// Add a device, or update it with --update.
+    ///
+    /// Everything the web form asks for, so a fleet can be provisioned from a
+    /// script instead of by hand.
+    Add(AddArgs),
+
+    /// Delete a device. Its Git history is kept.
+    Remove { name: String },
+
+    /// Include a device in fleet-wide runs.
+    Enable { name: String },
+
+    /// Exclude a device from fleet-wide runs.
+    Disable { name: String },
+}
+
+/// Exactly one credential source is required when creating a device.
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("credentials")
+        .args(["password", "password_env", "key", "agent"])
+))]
+struct AddArgs {
+    /// Unique name. Becomes the file name in the backup repository.
+    #[arg(long)]
+    name: String,
+
+    /// Hostname or IP address.
+    #[arg(long)]
+    host: String,
+
+    #[arg(long, default_value_t = 22)]
+    port: u16,
+
+    /// RouterOS user to log in as.
+    #[arg(long = "user", value_name = "USER")]
+    username: String,
+
+    /// Grouping; becomes a folder in the repository.
+    #[arg(long, default_value = "default")]
+    tenant: String,
+
+    /// Tag for filtering runs. Repeatable.
+    #[arg(long = "tag", value_name = "TAG")]
+    tags: Vec<String>,
+
+    /// SSH password. Ends up in your shell history — prefer --password-env.
+    #[arg(long, value_name = "PASSWORD")]
+    password: Option<String>,
+
+    /// Environment variable holding the SSH password.
+    #[arg(long, value_name = "VAR")]
+    password_env: Option<String>,
+
+    /// SSH private key path, as seen from inside the container.
+    #[arg(long, value_name = "FILE")]
+    key: Option<String>,
+
+    /// Environment variable holding the key passphrase.
+    #[arg(long, value_name = "VAR", requires = "key")]
+    key_passphrase_env: Option<String>,
+
+    /// Authenticate through a running ssh-agent.
+    #[arg(long)]
+    agent: bool,
+
+    /// Add the device but exclude it from fleet-wide runs.
+    #[arg(long)]
+    disabled: bool,
+
+    /// Update the device if it already exists, instead of failing.
+    ///
+    /// Makes a provisioning script safe to re-run. Credentials are left alone
+    /// unless a new one is given.
+    #[arg(long)]
+    update: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum SettingsCommand {
+    /// Show the current settings.
+    Show,
+
+    /// Configure the backup remote.
+    Remote(RemoteArgs),
+
+    /// Check the stored remote: connect and list its branches.
+    Test,
+}
+
+#[derive(Debug, Args)]
+struct RemoteArgs {
+    /// Repository URL. Pass an empty string to keep backups local only.
+    #[arg(long)]
+    url: Option<String>,
+
+    #[arg(long)]
+    branch: Option<String>,
+
+    /// Username sent with the token. GitHub ignores it.
+    #[arg(long)]
+    username: Option<String>,
+
+    /// Access token. Ends up in your shell history — prefer --token-env.
+    #[arg(long, value_name = "TOKEN", conflicts_with_all = ["token_env", "clear_token"])]
+    token: Option<String>,
+
+    /// Environment variable holding the access token.
+    #[arg(long, value_name = "VAR", conflicts_with = "clear_token")]
+    token_env: Option<String>,
+
+    /// Forget the stored token.
+    #[arg(long)]
+    clear_token: bool,
+
+    /// Push after each run.
+    #[arg(long, overrides_with = "no_push")]
+    push: bool,
+
+    /// Commit locally without pushing.
+    #[arg(long)]
+    no_push: bool,
+
+    /// Connect to the remote afterwards to check it.
+    #[arg(long)]
+    test: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -217,9 +351,8 @@ async fn dispatch(cli: Cli) -> Result<ExitCode> {
         Command::Serve(args) => serve(args).await,
         Command::Db { action } => db_command(action).await,
         Command::User { action } => user_command(action).await,
-        Command::Fleet {
-            action: FleetCommand::List,
-        } => fleet_list().await,
+        Command::Fleet { action } => fleet(action).await,
+        Command::Settings { action } => settings(action).await,
         Command::Device {
             action: DeviceCommand::Test { name },
         } => device_test(&name).await,
@@ -422,6 +555,250 @@ async fn device_test(name: &str) -> Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+async fn fleet(action: FleetCommand) -> Result<ExitCode> {
+    match action {
+        FleetCommand::List => fleet_list().await,
+        FleetCommand::Add(args) => fleet_add(args).await,
+        FleetCommand::Remove { name } => {
+            let db = connect().await?;
+            let device = db
+                .find_device_by_name(&name)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("no device named `{name}`"))?;
+            db.delete_device(device.id).await?;
+            println!("Removed `{}`. Its history in Git is kept.", device.name);
+            Ok(ExitCode::SUCCESS)
+        }
+        FleetCommand::Enable { name } => set_enabled(&name, true).await,
+        FleetCommand::Disable { name } => set_enabled(&name, false).await,
+    }
+}
+
+async fn set_enabled(name: &str, enabled: bool) -> Result<ExitCode> {
+    let db = connect().await?;
+    let device = db
+        .find_device_by_name(name)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no device named `{name}`"))?;
+    db.set_device_enabled(device.id, enabled).await?;
+    println!(
+        "`{}` is now {}.",
+        device.name,
+        if enabled { "enabled" } else { "disabled" }
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Add or update one device.
+///
+/// Built for provisioning scripts: with `--update` it is idempotent, and an
+/// omitted credential leaves the stored one alone.
+async fn fleet_add(args: AddArgs) -> Result<ExitCode> {
+    let db = connect().await?;
+
+    let (auth_kind, secret, private_key_path) = device_credentials(&args)?;
+    let existing = db.find_device_by_name(&args.name).await?;
+
+    // Without an explicit credential, fall back to whatever the device already
+    // uses, so `--update` can change a hostname without restating a password.
+    let auth_kind = match (&auth_kind, &existing) {
+        (None, Some(device)) => device.auth_kind.clone(),
+        (None, None) => {
+            bail!("no credential given: pass --password-env, --password, --key or --agent")
+        }
+        (Some(kind), _) => kind.clone(),
+    };
+
+    let input = mikrotik_dondude::db::DeviceInput {
+        name: args.name.clone(),
+        host: args.host,
+        port: args.port,
+        username: args.username,
+        tenant: args.tenant,
+        tags: args.tags,
+        enabled: !args.disabled,
+        auth_kind,
+        secret,
+        private_key_path,
+    };
+
+    match existing {
+        Some(device) if args.update => {
+            db.update_device(device.id, &input).await?;
+            println!("Updated `{}`.", args.name);
+        }
+        Some(_) => bail!(
+            "a device named `{}` already exists; pass --update to change it",
+            args.name
+        ),
+        None => {
+            db.create_device(&input).await?;
+            println!("Added `{}`.", args.name);
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Resolve the credential flags into what the database layer expects.
+///
+/// `None` for the kind means the caller gave no credential at all, which is
+/// only acceptable when updating an existing device.
+fn device_credentials(args: &AddArgs) -> Result<(Option<String>, Option<String>, Option<String>)> {
+    if let Some(var) = &args.password_env {
+        let password = std::env::var(var)
+            .map_err(|_| anyhow::anyhow!("{var} is not set in the environment"))?;
+        return Ok((Some("password".into()), Some(password), None));
+    }
+    if let Some(password) = &args.password {
+        // Worth saying out loud: this line is now in the shell history and in
+        // the process list of anything watching.
+        eprintln!(
+            "warning: --password puts the password in your shell history;              --password-env avoids that"
+        );
+        return Ok((Some("password".into()), Some(password.clone()), None));
+    }
+    if let Some(key) = &args.key {
+        let passphrase = match &args.key_passphrase_env {
+            Some(var) => Some(
+                std::env::var(var)
+                    .map_err(|_| anyhow::anyhow!("{var} is not set in the environment"))?,
+            ),
+            None => None,
+        };
+        return Ok((Some("key".into()), passphrase, Some(key.clone())));
+    }
+    if args.agent {
+        return Ok((Some("agent".into()), None, None));
+    }
+    Ok((None, None, None))
+}
+
+// ---------------------------------------------------------------------------
+// settings
+// ---------------------------------------------------------------------------
+
+async fn settings(action: SettingsCommand) -> Result<ExitCode> {
+    let db = connect().await?;
+    match action {
+        SettingsCommand::Show => {
+            let settings = db.settings().await?;
+            println!("repository path   {}", repo_path().display());
+            println!(
+                "remote url        {}",
+                settings
+                    .remote_url
+                    .as_deref()
+                    .unwrap_or("(none — local only)")
+            );
+            println!("remote branch     {}", settings.remote_branch);
+            println!("push after run    {}", settings.remote_push);
+            println!("git username      {}", settings.git_username);
+            println!(
+                "access token      {}",
+                if settings.has_git_token {
+                    "stored"
+                } else {
+                    "(none)"
+                }
+            );
+            println!("file layout       {}", settings.path_template);
+            println!("export mode       {}", settings.export_mode);
+            println!("show sensitive    {}", settings.show_sensitive);
+            println!("host key policy   {}", settings.host_key_policy);
+            println!(
+                "daily schedule    {}",
+                if settings.schedule_enabled {
+                    format!(
+                        "{:02}:{:02} UTC",
+                        settings.schedule_hour, settings.schedule_minute
+                    )
+                } else {
+                    "off".to_string()
+                }
+            );
+            println!("parallel devices  {}", settings.concurrency);
+        }
+
+        SettingsCommand::Remote(args) => {
+            let current = db.settings().await?;
+            let mut input = current.to_input();
+
+            if let Some(url) = &args.url {
+                input.remote_url = Some(url.clone()).filter(|u| !u.trim().is_empty());
+            }
+            if let Some(branch) = &args.branch {
+                input.remote_branch = branch.clone();
+            }
+            if let Some(username) = &args.username {
+                input.git_username = username.clone();
+            }
+            if args.push {
+                input.remote_push = true;
+            }
+            if args.no_push {
+                input.remote_push = false;
+            }
+
+            // `None` keeps the stored token; an empty string clears it.
+            input.git_token = if args.clear_token {
+                Some(String::new())
+            } else if let Some(var) = &args.token_env {
+                Some(
+                    std::env::var(var)
+                        .map_err(|_| anyhow::anyhow!("{var} is not set in the environment"))?,
+                )
+            } else if let Some(token) = &args.token {
+                eprintln!(
+                    "warning: --token puts the token in your shell history;                      --token-env avoids that"
+                );
+                Some(token.clone())
+            } else {
+                None
+            };
+
+            db.update_settings(&input).await?;
+            println!("Settings saved.");
+
+            if args.test {
+                match probe_stored_remote(&db).await {
+                    Ok(message) => println!("{message}"),
+                    Err(error) => bail!("{error:#}"),
+                }
+            }
+        }
+
+        SettingsCommand::Test => match probe_stored_remote(&db).await {
+            Ok(message) => println!("{message}"),
+            Err(error) => bail!("{error:#}"),
+        },
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Connect to the configured remote and report what is there.
+async fn probe_stored_remote(db: &Db) -> Result<String> {
+    let settings = db.settings().await?;
+    let url = settings
+        .remote_url
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no repository URL configured"))?;
+    let token = db.git_token().await?;
+    let auth = match token {
+        Some(token) => mikrotik_dondude::config::GitAuth::Token {
+            username: settings.git_username.clone(),
+            token,
+        },
+        None => mikrotik_dondude::config::GitAuth::None,
+    };
+    // libgit2 blocks, so keep it off the async worker.
+    let branch = settings.remote_branch.clone();
+    Ok(tokio::task::spawn_blocking(move || {
+        mikrotik_dondude::git::probe_remote(&url, &branch, &auth)
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("the repository worker panicked"))??)
 }
 
 async fn fleet_list() -> Result<ExitCode> {

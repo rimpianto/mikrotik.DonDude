@@ -247,6 +247,35 @@ impl DeviceInput {
     }
 }
 
+impl Settings {
+    /// The current settings as an update payload, for callers that want to
+    /// change one field and leave the rest alone.
+    ///
+    /// `git_token` is `None`, which means "keep the stored one" — a partial
+    /// update must never silently drop the token.
+    pub fn to_input(&self) -> SettingsInput {
+        SettingsInput {
+            path_template: self.path_template.clone(),
+            committer_name: self.committer_name.clone(),
+            committer_email: self.committer_email.clone(),
+            remote_url: self.remote_url.clone(),
+            remote_branch: self.remote_branch.clone(),
+            remote_push: self.remote_push,
+            git_username: self.git_username.clone(),
+            git_token: None,
+            export_mode: self.export_mode.clone(),
+            show_sensitive: self.show_sensitive,
+            concurrency: self.concurrency,
+            connect_timeout_secs: self.connect_timeout_secs,
+            command_timeout_secs: self.command_timeout_secs,
+            host_key_policy: self.host_key_policy.clone(),
+            schedule_enabled: self.schedule_enabled,
+            schedule_hour: self.schedule_hour,
+            schedule_minute: self.schedule_minute,
+        }
+    }
+}
+
 /// Settings as submitted by the settings form.
 #[derive(Debug, Clone)]
 pub struct SettingsInput {
@@ -739,6 +768,23 @@ impl Db {
         .await?
         .ok_or(Error::NotFound("device"))?;
         device_row(&row)
+    }
+
+    /// Find a device by name, case-insensitively. Names are unique per tenant,
+    /// so this returns the first match across tenants — enough for the command
+    /// line, which addresses devices by name.
+    pub async fn find_device_by_name(&self, name: &str) -> Result<Option<DeviceRow>> {
+        let row = sqlx::query(
+            "SELECT d.*, t.slug AS tenant
+               FROM devices d JOIN tenants t ON t.id = d.tenant_id
+              WHERE lower(d.name) = lower($1)
+              ORDER BY t.slug
+              LIMIT 1",
+        )
+        .bind(name.trim())
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(device_row).transpose()
     }
 
     pub async fn create_device(&self, input: &DeviceInput) -> Result<Uuid> {

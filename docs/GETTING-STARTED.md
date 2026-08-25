@@ -211,6 +211,29 @@ That is it. Nothing else to set up — no cron, no systemd timer.
 
 ---
 
+## Doing all of this from a script instead
+
+Everything above except creating the first operator account can be done from the
+command line, which is worth knowing before you build a second installation:
+
+```sh
+export GITHUB_TOKEN='github_pat_...'
+export RTR_PASSWORD='...'
+
+dondude user add admin --password '...'
+dondude settings remote --url https://github.com/you/mikrotik-backups.git \
+    --token-env GITHUB_TOKEN --push --test
+dondude fleet add --update --name core-rtr-01 --host 10.0.0.1 \
+    --user dondude-backup --tenant acme --password-env RTR_PASSWORD
+dondude backup run --dry-run
+```
+
+`--update` makes it safe to re-run, so this doubles as the way to rebuild a
+deployment without retyping anything. See
+[MANUAL.md → The command line](MANUAL.md#the-command-line).
+
+---
+
 ## Where to go next
 
 * [MANUAL.md](MANUAL.md) — every screen and setting, the command line, and what
