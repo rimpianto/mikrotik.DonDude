@@ -291,7 +291,10 @@ impl BackupRepo {
             name = remote_config.name
         );
         let mut options = git2::FetchOptions::new();
-        options.remote_callbacks(auth::callbacks(&remote_config.auth));
+        options.remote_callbacks(auth::callbacks(
+            &remote_config.auth,
+            remote_config.allow_invalid_certs,
+        ));
 
         if let Err(error) = remote.fetch(&[refspec.as_str()], Some(&mut options), None) {
             warn!(%error, "could not fetch the backup remote; continuing locally");
@@ -518,7 +521,8 @@ impl BackupRepo {
         // Scoped so the callbacks (which borrow `rejections`) are dropped
         // before the collected rejections are read back out.
         {
-            let mut callbacks = auth::callbacks(&remote_config.auth);
+            let mut callbacks =
+                auth::callbacks(&remote_config.auth, remote_config.allow_invalid_certs);
             callbacks.push_update_reference(|reference, status| {
                 if let Some(reason) = status {
                     rejections
@@ -711,9 +715,14 @@ impl BackupRepo {
 /// Connects and lists refs without creating a working tree, which is what makes
 /// it usable as a "test connection" button. Read access is proven; write access
 /// is not — only a real push can show that.
-pub fn probe_remote(url: &str, branch: &str, auth: &crate::config::GitAuth) -> Result<String> {
+pub fn probe_remote(
+    url: &str,
+    branch: &str,
+    auth: &crate::config::GitAuth,
+    allow_invalid_certs: bool,
+) -> Result<String> {
     let mut remote = git2::Remote::create_detached(url)?;
-    let callbacks = auth::callbacks(auth);
+    let callbacks = auth::callbacks(auth, allow_invalid_certs);
     remote.connect_auth(git2::Direction::Fetch, Some(callbacks), None)?;
 
     let wanted = format!("refs/heads/{branch}");
@@ -859,6 +868,7 @@ mod tests {
             branch: "main".into(),
             push: true,
             auth: GitAuth::None,
+            allow_invalid_certs: false,
         };
         config.remote = Some(remote.clone());
 

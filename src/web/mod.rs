@@ -80,6 +80,7 @@ impl AppState {
         branch: &str,
         username: &str,
         token: Option<&str>,
+        allow_invalid_certs: bool,
     ) -> Result<String> {
         let auth = match token {
             Some(token) => GitAuth::Token {
@@ -89,9 +90,11 @@ impl AppState {
             None => GitAuth::None,
         };
         let (url, branch) = (url.to_string(), branch.to_string());
-        tokio::task::spawn_blocking(move || crate::git::probe_remote(&url, &branch, &auth))
-            .await
-            .map_err(|_| Error::config("the repository worker panicked"))?
+        tokio::task::spawn_blocking(move || {
+            crate::git::probe_remote(&url, &branch, &auth, allow_invalid_certs)
+        })
+        .await
+        .map_err(|_| Error::config("the repository worker panicked"))?
     }
 }
 

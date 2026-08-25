@@ -33,6 +33,7 @@ fn settings_body(remote_url: &str, token: &str) -> String {
         ("git_username", "x-access-token"),
         ("git_token", token),
         ("remote_push", "1"),
+        // Deliberately absent from some cases: an unchecked box sends nothing.
         ("export_mode", "terse"),
         ("host_key_policy", "accept-new"),
         ("schedule_hour", "3"),

@@ -123,35 +123,51 @@ If it fails, the message says why. The table at the end of
 
 ---
 
-## 4. Set up the GitHub repository
+## 4. Set up the backup repository
 
 Do this **before the first backup**. Backing up locally first and adding the
 repository afterwards leaves two unrelated histories that need a git command to
 untangle.
 
-**On GitHub:** create a new repository, **private** — it will describe your
-network. Empty is cleanest, but one initialised with a README works too.
+Any Git host that takes a token works — GitHub, or a Gitea you run yourself.
+Create the repository **private**: it will describe your network. Empty is
+cleanest, but one initialised with a README works too.
 
-**The token:** *Settings → Developer settings → Personal access tokens →
-Fine-grained tokens → Generate new token*
+### With GitHub
+
+*Settings → Developer settings → Personal access tokens → Fine-grained tokens →
+Generate new token*
 
 * **Repository access**: `Only select repositories` → the backup repository only
 * **Permissions → Repository permissions → Contents: Read and write**
 
 GitHub adds *Metadata: Read-only* by itself; that is expected. Nothing else is
-needed.
+needed. A classic token would need the `repo` scope, which grants access to
+*all* your repositories — prefer the fine-grained one.
 
-A classic token would need the `repo` scope, which grants access to *all* your
-repositories. Prefer the fine-grained one.
+In DonDude — **Settings**:
 
-**In DonDude — Settings:**
-
-* **Repository URL**: the HTTPS URL, e.g.
-  `https://github.com/you/mikrotik-backups.git`
+* **Repository URL**: `https://github.com/you/mikrotik-backups.git`
 * **Branch**: `main`
 * **Username**: leave `x-access-token` — GitHub ignores it when the password is
   a token
 * **Access token**: paste it
+
+### With a self-hosted Gitea
+
+*Settings → Applications → Access tokens*, with the `write:repository` scope.
+
+In DonDude — **Settings**:
+
+* **Repository URL**: `http://gitea.lan:3000/you/mikrotik-backups.git`
+* **Branch**: `main`
+* **Username**: **your Gitea account name** — unlike GitHub, Gitea checks it
+* **Access token**: paste it
+
+Plain `http://` on a LAN needs nothing else. If your Gitea is on `https://` with
+a self-signed certificate, tick **Accept an untrusted TLS certificate** — and
+read [what that gives up](MANUAL.md#self-hosted-instances-with-a-self-signed-certificate)
+first.
 
 Press **Save and test connection**. Expect one of:
 

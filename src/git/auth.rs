@@ -6,8 +6,8 @@
 
 use std::cell::Cell;
 
-use git2::{Cred, RemoteCallbacks};
-use tracing::debug;
+use git2::{CertificateCheckStatus, Cred, RemoteCallbacks};
+use tracing::{debug, warn};
 
 use crate::config::GitAuth;
 
@@ -18,9 +18,23 @@ const MAX_ATTEMPTS: usize = 3;
 ///
 /// The returned value borrows `auth`, so keep it alive for the whole
 /// fetch or push.
-pub fn callbacks(auth: &GitAuth) -> RemoteCallbacks<'_> {
+pub fn callbacks(auth: &GitAuth, allow_invalid_certs: bool) -> RemoteCallbacks<'_> {
     let attempts = Cell::new(0usize);
     let mut callbacks = RemoteCallbacks::new();
+
+    if allow_invalid_certs {
+        // Accepts any certificate, which is the point: a self-hosted instance
+        // with a self-signed certificate cannot be verified. Logged on every
+        // connection so it never becomes invisible.
+        callbacks.certificate_check(|_certificate, host| {
+            warn!(
+                host,
+                "accepting an unverified TLS certificate because the remote is configured \
+                 to allow it"
+            );
+            Ok(CertificateCheckStatus::CertificateOk)
+        });
+    }
 
     callbacks.credentials(move |url, username_from_url, allowed| {
         let attempt = attempts.get() + 1;
@@ -34,7 +48,8 @@ pub fn callbacks(auth: &GitAuth) -> RemoteCallbacks<'_> {
         debug!(attempt, %url, ?allowed, "offering credentials");
 
         match auth {
-            // GitHub accepts any username when the password is a token.
+            // HTTP basic. GitHub ignores the username when the password is a
+            // token; Gitea and friends check it.
             GitAuth::Token { username, token } => Cred::userpass_plaintext(username, token),
             GitAuth::None => {
                 let config = git2::Config::open_default()?;

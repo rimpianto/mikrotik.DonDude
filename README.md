@@ -57,19 +57,27 @@ clear.
 | **Devices** | Add, edit, enable and delete routers; test a connection |
 | **Device → history** | Every commit that changed that router, with a coloured diff |
 | **Runs** | Every run, its live log while it happens, and per-device outcomes |
-| **Settings** | GitHub repository and token, export detail, host-key policy, daily schedule |
+| **Settings** | Backup repository and token, export detail, host-key policy, daily schedule |
 
 A **dry run** connects to every device and reports what *would* change, without
 writing, committing or pushing anything. Useful for a first look at a new fleet.
 
-## Setting up the GitHub remote
+## Setting up the backup remote
+
+Works with GitHub, Gitea, Forgejo or GitLab — anything that accepts HTTP basic
+authentication with a token, over HTTP or HTTPS.
 
 1. Create an **empty, private** repository — it will describe your network.
-2. Generate a fine-grained personal access token limited to that one repository,
-   with **Contents: Read and write**. (A classic token needs the `repo` scope,
-   which grants access to *all* your repositories; prefer the fine-grained one.)
-3. In **Settings**, paste the repository URL and the token, then press **Test
-   connection** before saving.
+2. Generate a token scoped to that repository alone: on GitHub a fine-grained
+   token with **Contents: Read and write**; on Gitea or Forgejo one with
+   **write:repository**.
+3. In **Settings**, paste the repository URL and the token, then press **Save
+   and test connection**.
+
+On GitHub the username field is ignored, so `x-access-token` is fine. On Gitea,
+Forgejo and GitLab it is **checked** — put your account name there. A self-hosted
+instance with a self-signed certificate needs *Accept an untrusted TLS
+certificate*; see [the manual](docs/MANUAL.md#self-hosted-instances-with-a-self-signed-certificate).
 
 The token is encrypted before it is stored, and the settings page never renders
 it back — it shows only whether one is present.

@@ -657,6 +657,7 @@ pub struct SettingsForm {
     git_username: String,
     git_token: String,
     remote_push: Option<String>,
+    allow_invalid_certs: Option<String>,
     export_mode: String,
     host_key_policy: String,
     show_sensitive: Option<String>,
@@ -710,6 +711,7 @@ impl SettingsForm {
             schedule_enabled: self.schedule_enabled.is_some(),
             schedule_hour: number(&self.schedule_hour, 2, 0, 23),
             schedule_minute: number(&self.schedule_minute, 30, 0, 59),
+            allow_invalid_certs: self.allow_invalid_certs.is_some(),
         }
     }
 }
@@ -792,6 +794,7 @@ pub async fn test_remote(
             &stored.remote_branch,
             &stored.git_username,
             token.as_deref(),
+            stored.allow_invalid_certs,
         )
         .await;
 

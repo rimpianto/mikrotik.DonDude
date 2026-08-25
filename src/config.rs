@@ -158,6 +158,13 @@ pub struct Remote {
     /// Push after committing. `false` keeps history local.
     pub push: bool,
     pub auth: GitAuth,
+    /// Skip TLS certificate verification for this remote.
+    ///
+    /// For a self-hosted Gitea, Forgejo or GitLab with a self-signed
+    /// certificate. It removes the protection against a man-in-the-middle on
+    /// the push, so it stays off unless an operator asks for it; adding the
+    /// instance's CA to the trust store is the better fix.
+    pub allow_invalid_certs: bool,
 }
 
 impl std::fmt::Debug for Remote {
@@ -168,15 +175,17 @@ impl std::fmt::Debug for Remote {
             .field("branch", &self.branch)
             .field("push", &self.push)
             .field("auth", &self.auth)
+            .field("allow_invalid_certs", &self.allow_invalid_certs)
             .finish()
     }
 }
 
 /// How to authenticate against the backup remote.
 ///
-/// HTTPS-with-a-token only, deliberately: DonDude runs in a container, and a
-/// deploy key would mean mounting a private key and exposing file paths in the
-/// UI for no gain over a scoped token.
+/// HTTP basic with a token only, deliberately: DonDude runs in a container, and
+/// a deploy key would mean mounting a private key and exposing file paths in the
+/// UI for no gain over a scoped token. This is what GitHub, Gitea, Forgejo and
+/// GitLab all accept — GitHub ignores the username, the others check it.
 #[derive(Clone)]
 pub enum GitAuth {
     Token {
@@ -762,6 +771,7 @@ mod tests {
                 username: "x-access-token".into(),
                 token: "github_pat_SECRET".into(),
             },
+            allow_invalid_certs: false,
         };
         let rendered = format!("{remote:?}");
         assert!(!rendered.contains("SECRET"), "token leaked: {rendered}");

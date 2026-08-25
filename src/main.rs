@@ -290,6 +290,15 @@ struct RemoteArgs {
     #[arg(long)]
     no_push: bool,
 
+    /// Accept an untrusted TLS certificate, for a self-hosted instance with a
+    /// self-signed one. Disables verification for the push.
+    #[arg(long)]
+    insecure_tls: bool,
+
+    /// Require a valid TLS certificate again.
+    #[arg(long, conflicts_with = "insecure_tls")]
+    secure_tls: bool,
+
     /// Connect to the remote afterwards to check it.
     #[arg(long)]
     test: bool,
@@ -708,6 +717,14 @@ async fn settings(action: SettingsCommand) -> Result<ExitCode> {
             println!("show sensitive    {}", settings.show_sensitive);
             println!("host key policy   {}", settings.host_key_policy);
             println!(
+                "tls verification  {}",
+                if settings.allow_invalid_certs {
+                    "DISABLED (untrusted certificates accepted)"
+                } else {
+                    "enforced"
+                }
+            );
+            println!(
                 "daily schedule    {}",
                 if settings.schedule_enabled {
                     format!(
@@ -739,6 +756,12 @@ async fn settings(action: SettingsCommand) -> Result<ExitCode> {
             }
             if args.no_push {
                 input.remote_push = false;
+            }
+            if args.insecure_tls {
+                input.allow_invalid_certs = true;
+            }
+            if args.secure_tls {
+                input.allow_invalid_certs = false;
             }
 
             // `None` keeps the stored token; an empty string clears it.
@@ -794,8 +817,9 @@ async fn probe_stored_remote(db: &Db) -> Result<String> {
     };
     // libgit2 blocks, so keep it off the async worker.
     let branch = settings.remote_branch.clone();
+    let insecure = settings.allow_invalid_certs;
     Ok(tokio::task::spawn_blocking(move || {
-        mikrotik_dondude::git::probe_remote(&url, &branch, &auth)
+        mikrotik_dondude::git::probe_remote(&url, &branch, &auth, insecure)
     })
     .await
     .map_err(|_| anyhow::anyhow!("the repository worker panicked"))??)

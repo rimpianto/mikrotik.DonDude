@@ -113,15 +113,53 @@ without touching history.
 
 ## Settings, field by field
 
-### GitHub repository
+### Backup repository
+
+Any Git host that accepts HTTP basic authentication with a token: GitHub, Gitea,
+Forgejo, GitLab. Both HTTP and HTTPS URLs work.
 
 | Field | Notes |
 |---|---|
-| **Repository URL** | HTTPS URL of a **private** repository. Empty keeps backups on this machine only. |
+| **Repository URL** | HTTP(S) URL of a **private** repository. Empty keeps backups on this machine only. |
 | **Branch** | `main` unless you have a reason. |
-| **Username** | Ignored by GitHub when the password is a token; `x-access-token` is the convention. |
+| **Username** | GitHub ignores it when the password is a token, so `x-access-token` is fine. **Gitea, Forgejo and GitLab check it** — put your account name there. |
 | **Access token** | Encrypted before storage and never shown again. Empty on save keeps the stored one; a single `-` removes it. |
 | **Push after each run** | Off keeps history local while still committing. |
+| **Accept an untrusted TLS certificate** | For a self-hosted instance with a self-signed certificate. See below. |
+
+#### Tokens per host
+
+| Host | Where | What it needs |
+|---|---|---|
+| **GitHub** | Settings → Developer settings → Personal access tokens → Fine-grained | *Repository access*: only the backup repository. *Permissions → Contents: Read and write*. (GitHub adds *Metadata: Read-only* itself.) |
+| **Gitea / Forgejo** | Settings → Applications → Access tokens | Scope `write:repository` |
+| **GitLab** | Settings → Access tokens (project or personal) | Scope `write_repository` |
+
+A GitHub classic token would need the `repo` scope, which grants access to *all*
+your repositories. Prefer the fine-grained one.
+
+#### Self-hosted instances with a self-signed certificate
+
+A Gitea on the LAN over plain `http://` needs nothing special — it works as is.
+
+Over `https://` with a certificate the system does not trust, the push fails
+with a certificate error. Two ways out, best first:
+
+1. **Add the instance's CA to the trust store.** In Docker, mount it into the
+   image's bundle so verification keeps working for every host:
+
+   ```yaml
+   volumes:
+     - ./my-ca.crt:/usr/local/share/ca-certificates/my-ca.crt:ro
+   ```
+
+   then rebuild the bundle at start-up, or bake the certificate into a derived
+   image with `update-ca-certificates`.
+
+2. **Tick *Accept an untrusted TLS certificate*.** This disables verification
+   for the push, so a man-in-the-middle on that connection would go unnoticed.
+   It is logged on every connection rather than silently accepted. Reasonable on
+   a trusted LAN, not over the internet.
 
 **Save and test connection** stores the settings and then connects, so what is
 on screen is what was stored and what was tested. It proves read access; write
@@ -314,12 +352,25 @@ dondude settings remote \
 |---|---|
 | `--url` | Repository URL. An empty string keeps backups local only. |
 | `--branch` | Defaults to whatever is already stored |
-| `--username` | Sent with the token; GitHub ignores it |
+| `--username` | Sent with the token. GitHub ignores it; Gitea and GitLab check it. |
 | `--token-env VAR` | Reads the token from the environment. Preferred. |
 | `--token T` | Lands in your shell history. Warns when used. |
 | `--clear-token` | Forget the stored token |
 | `--push` / `--no-push` | Whether a run pushes |
+| `--insecure-tls` / `--secure-tls` | Accept, or stop accepting, an untrusted TLS certificate |
 | `--test` | Connect to the remote afterwards and report what is there |
+
+A self-hosted Gitea looks like this:
+
+```sh
+export GITEA_TOKEN='...'
+dondude settings remote \
+    --url http://gitea.lan:3000/you/mikrotik-backups.git \
+    --branch main \
+    --username your-gitea-username \
+    --token-env GITEA_TOKEN \
+    --push --test
+```
 
 Every flag is optional and only what is given changes; in particular, omitting
 the token keeps the stored one. `dondude settings test` checks the stored remote
@@ -474,13 +525,14 @@ and no two-factor authentication.
 | `timed out after ...` | Raise **Command timeout**; a large export over a slow link needs headroom |
 | `private key ... is unreadable` | The path is inside the container — check the volume mount |
 
-### Remote messages
+### Repository messages
 
 | Message | Cause |
 |---|---|
 | `the remote rejected every credential offered` | Wrong, expired, or under-scoped token. It needs **Contents: Read and write** on *that* repository. |
 | `remote rejected the push (non-fast-forward)` | Someone else pushed. Run again — DonDude fetches and fast-forwards first. |
-| `certificate verify failed` | Missing CA bundle. The image sets `SSL_CERT_FILE`; a hand-rolled deployment must too. |
+| `certificate verify failed` | For a public host: a missing CA bundle — the image sets `SSL_CERT_FILE`, a hand-rolled deployment must too. For a self-hosted one: an untrusted certificate. See [self-hosted instances](#self-hosted-instances-with-a-self-signed-certificate). |
+| `401` or `403` from a self-hosted instance | Gitea, Forgejo and GitLab check the **username** as well as the token. `x-access-token` only works on GitHub. |
 | `has uncommitted changes and is behind` | Something edited the working tree by hand. Commit or discard it. |
 
 ### Unrelated histories

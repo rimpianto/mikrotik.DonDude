@@ -854,7 +854,7 @@ pub fn settings(
             @if let Some(message) = error { div.banner.err { (message) } }
 
             form method="post" action="/settings" {
-                h2 { "GitHub repository" }
+                h2 { "Backup repository" }
                 div.card {
                     label {
                         "Repository URL"
@@ -862,10 +862,13 @@ pub fn settings(
                             placeholder="https://github.com/you/mikrotik-backups.git"
                             value=(settings.remote_url.clone().unwrap_or_default());
                         div.hint {
-                            "Create an empty "
+                            "GitHub, Gitea, Forgejo or GitLab. Create an empty "
                             strong { "private" }
-                            " repository on GitHub and paste its HTTPS URL. \
-                             Leave empty to keep backups on this machine only."
+                            " repository and paste its HTTP(S) URL — for example "
+                            span.mono { "https://github.com/you/backups.git" }
+                            " or "
+                            span.mono { "https://gitea.lan:3000/you/backups.git" }
+                            ". Leave empty to keep backups on this machine only."
                         }
                         div.hint {
                             "Set this up "
@@ -886,7 +889,13 @@ pub fn settings(
                             "Username"
                             input type="text" name="git_username"
                                 value=(settings.git_username.clone());
-                            div.hint { "Ignored by GitHub when the password is a token." }
+                            div.hint {
+                                "GitHub ignores this when the password is a token, so "
+                                span.mono { "x-access-token" }
+                                " is fine. Gitea, Forgejo and GitLab "
+                                strong { "check" }
+                                " it — put your account name there."
+                            }
                         }
                     }
                     label {
@@ -903,14 +912,31 @@ pub fn settings(
                                 span.mono { "-" }
                                 " to remove it. "
                             }
-                            "Use a fine-grained token limited to that one repository with "
-                            strong { "Contents: Read and write" } "."
+                            "On GitHub, use a fine-grained token limited to that one \
+                             repository with "
+                            strong { "Contents: Read and write" }
+                            ". On Gitea or Forgejo, a personal access token with the "
+                            strong { "write:repository" }
+                            " scope."
                         }
                     }
                     label.check {
                         input type="checkbox" name="remote_push" value="1"
                             checked[settings.remote_push];
-                        "Push to GitHub after each run"
+                        "Push to the repository after each run"
+                    }
+                    label.check {
+                        input type="checkbox" name="allow_invalid_certs" value="1"
+                            checked[settings.allow_invalid_certs];
+                        "Accept an untrusted TLS certificate"
+                    }
+                    div.hint {
+                        "Only for a self-hosted instance with a self-signed certificate. \
+                         It disables verification for the push, so a man-in-the-middle on \
+                         that connection would go unnoticed. Adding the instance's CA to \
+                         the trust store is the better fix; plain "
+                        span.mono { "http://" }
+                        " does not need this."
                     }
                     div.actions {
                         button type="submit" formaction="/settings/test" formnovalidate {

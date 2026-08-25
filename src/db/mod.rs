@@ -137,6 +137,9 @@ pub struct Settings {
     pub remote_push: bool,
     pub git_username: String,
     pub has_git_token: bool,
+    /// Skip TLS verification on the remote — for a self-hosted instance with a
+    /// self-signed certificate.
+    pub allow_invalid_certs: bool,
     pub export_mode: String,
     pub show_sensitive: bool,
     pub concurrency: i32,
@@ -263,6 +266,7 @@ impl Settings {
             remote_push: self.remote_push,
             git_username: self.git_username.clone(),
             git_token: None,
+            allow_invalid_certs: self.allow_invalid_certs,
             export_mode: self.export_mode.clone(),
             show_sensitive: self.show_sensitive,
             concurrency: self.concurrency,
@@ -288,6 +292,7 @@ pub struct SettingsInput {
     pub git_username: String,
     /// `None` leaves the stored token alone; `Some("")` clears it.
     pub git_token: Option<String>,
+    pub allow_invalid_certs: bool,
     pub export_mode: String,
     pub show_sensitive: bool,
     pub concurrency: i32,
@@ -643,6 +648,7 @@ impl Db {
         let row = sqlx::query(
             "SELECT path_template, committer_name, committer_email, remote_url, remote_branch,
                     remote_push, git_username, git_token_sealed IS NOT NULL AS has_git_token,
+                    allow_invalid_certs,
                     export_mode, show_sensitive, concurrency, connect_timeout_secs,
                     command_timeout_secs, host_key_policy, schedule_enabled, schedule_hour,
                     schedule_minute
@@ -660,6 +666,7 @@ impl Db {
             remote_push: row.try_get("remote_push")?,
             git_username: row.try_get("git_username")?,
             has_git_token: row.try_get("has_git_token")?,
+            allow_invalid_certs: row.try_get("allow_invalid_certs")?,
             export_mode: row.try_get("export_mode")?,
             show_sensitive: row.try_get("show_sensitive")?,
             concurrency: row.try_get("concurrency")?,
@@ -701,7 +708,7 @@ impl Db {
                  export_mode = $8, show_sensitive = $9, concurrency = $10,
                  connect_timeout_secs = $11, command_timeout_secs = $12, host_key_policy = $13,
                  schedule_enabled = $14, schedule_hour = $15, schedule_minute = $16,
-                 updated_at = now()
+                 allow_invalid_certs = $17, updated_at = now()
              WHERE id",
         )
         .bind(input.path_template.trim())
@@ -726,6 +733,7 @@ impl Db {
         .bind(input.schedule_enabled)
         .bind(input.schedule_hour)
         .bind(input.schedule_minute)
+        .bind(input.allow_invalid_certs)
         .execute(&mut *tx)
         .await?;
 
@@ -963,6 +971,7 @@ impl Db {
                 },
                 None => GitAuth::None,
             },
+            allow_invalid_certs: settings.allow_invalid_certs,
         });
 
         let config = Config {
