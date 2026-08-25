@@ -6,7 +6,7 @@
 //! ```sh
 //! docker run -d --name dondude-pg -e POSTGRES_PASSWORD=dondude \
 //!     -e POSTGRES_USER=dondude -e POSTGRES_DB=dondude -p 55432:5432 postgres:17-alpine
-//! TEST_DATABASE_URL=postgres://dondude:dondude@127.0.0.1:55432/dondude cargo test --test database
+//! TEST_DATABASE_URL=postgres://dondude:dondude@127.0.0.1:55432/dondude_test cargo test --test database
 //! ```
 //!
 //! It runs as one test rather than several so the tables can be truncated once
@@ -17,6 +17,8 @@
 //! out too: secrets sealed with the test's disposable key would otherwise sit in
 //! `settings` and make a real deployment fail to decrypt, with an error that
 //! looks like a lost master key.
+
+mod common;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -69,8 +71,8 @@ fn settings_input(token: Option<&str>) -> SettingsInput {
 
 #[tokio::test]
 async fn the_database_layer_round_trips_a_whole_deployment() {
-    let Ok(dsn) = std::env::var("TEST_DATABASE_URL") else {
-        eprintln!("TEST_DATABASE_URL not set — skipping the PostgreSQL integration test");
+    let Some(dsn) = common::test_dsn() else {
+        eprintln!("TEST_DATABASE_URL not set — skipping");
         return;
     };
 

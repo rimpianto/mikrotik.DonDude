@@ -187,13 +187,13 @@ dondude serve
 
 ```sh
 cargo test                     # unit and integration tests; no router, database or network needed
-TEST_DATABASE_URL=postgres://... cargo test          # adds the SQL and HTTP layers
+TEST_DATABASE_URL=postgres://.../dondude_test cargo test          # adds the SQL and HTTP layers
 ```
 
 Device behaviour is covered with canned `/export` text, and push/fetch against a
-local bare repository created by the test. The PostgreSQL test is skipped unless
-`TEST_DATABASE_URL` is set — and it **truncates every table**, so point it at a
-throwaway database.
+local bare repository created by the test. The PostgreSQL tests are skipped
+unless `TEST_DATABASE_URL` is set — and they **truncate every table**, so they
+refuse to run unless the database name contains `test`.
 
 ## Documentation
 

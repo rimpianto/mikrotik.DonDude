@@ -36,8 +36,8 @@ cargo run -- keygen
 
 # The SQL layer, against a throwaway PostgreSQL:
 docker run -d --name dondude-pg -e POSTGRES_PASSWORD=dondude \
-    -e POSTGRES_USER=dondude -e POSTGRES_DB=dondude -p 55432:5432 postgres:17-alpine
-TEST_DATABASE_URL=postgres://dondude:dondude@127.0.0.1:55432/dondude \
+    -e POSTGRES_USER=dondude -e POSTGRES_DB=dondude_test -p 55432:5432 postgres:17-alpine
+TEST_DATABASE_URL=postgres://dondude:dondude@127.0.0.1:55432/dondude_test \
     cargo test --test database --test web
 
 # The whole stack:
@@ -46,9 +46,15 @@ docker compose logs -f app
 docker compose exec app dondude fleet list
 ```
 
-`tests/database.rs` **skips itself** when `TEST_DATABASE_URL` is unset, so plain
-`cargo test` passes anywhere. Keep it that way; do not make the default test run
-depend on a live database.
+`tests/database.rs` and `tests/web.rs` **skip themselves** when
+`TEST_DATABASE_URL` is unset, so plain `cargo test` passes anywhere. Keep it that
+way; do not make the default test run depend on a live database.
+
+They also `TRUNCATE` every table, so `tests/common::test_dsn` **refuses** a DSN
+whose database name does not contain `test`. That guard exists because the
+obvious DSN to paste is the one already in the shell's history — the running
+deployment's — and doing so silently destroys the inventory and every stored
+credential. It happened repeatedly during development. Do not weaken it.
 
 ### Native dependencies
 

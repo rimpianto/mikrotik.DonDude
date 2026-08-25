@@ -9,6 +9,8 @@
 //! Unit tests cannot see that — it only shows up in the request/response round
 //! trip.
 
+mod common;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -152,8 +154,8 @@ impl Client {
 
 #[tokio::test]
 async fn the_web_interface_round_trips_what_an_operator_submits() {
-    let Ok(dsn) = std::env::var("TEST_DATABASE_URL") else {
-        eprintln!("TEST_DATABASE_URL not set — skipping the web interface test");
+    let Some(dsn) = common::test_dsn() else {
+        eprintln!("TEST_DATABASE_URL not set — skipping");
         return;
     };
 
