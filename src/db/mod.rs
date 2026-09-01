@@ -149,6 +149,9 @@ pub struct Settings {
     pub schedule_enabled: bool,
     pub schedule_hour: i32,
     pub schedule_minute: i32,
+    pub monitor_enabled: bool,
+    pub monitor_interval_secs: i32,
+    pub monitor_retention_days: i32,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -276,6 +279,9 @@ impl Settings {
             schedule_enabled: self.schedule_enabled,
             schedule_hour: self.schedule_hour,
             schedule_minute: self.schedule_minute,
+            monitor_enabled: self.monitor_enabled,
+            monitor_interval_secs: self.monitor_interval_secs,
+            monitor_retention_days: self.monitor_retention_days,
         }
     }
 }
@@ -302,6 +308,9 @@ pub struct SettingsInput {
     pub schedule_enabled: bool,
     pub schedule_hour: i32,
     pub schedule_minute: i32,
+    pub monitor_enabled: bool,
+    pub monitor_interval_secs: i32,
+    pub monitor_retention_days: i32,
 }
 
 // ---------------------------------------------------------------------------
@@ -651,7 +660,8 @@ impl Db {
                     allow_invalid_certs,
                     export_mode, show_sensitive, concurrency, connect_timeout_secs,
                     command_timeout_secs, host_key_policy, schedule_enabled, schedule_hour,
-                    schedule_minute
+                    schedule_minute, monitor_enabled, monitor_interval_secs,
+                    monitor_retention_days
                FROM settings WHERE id",
         )
         .fetch_one(&self.pool)
@@ -676,6 +686,9 @@ impl Db {
             schedule_enabled: row.try_get("schedule_enabled")?,
             schedule_hour: row.try_get("schedule_hour")?,
             schedule_minute: row.try_get("schedule_minute")?,
+            monitor_enabled: row.try_get("monitor_enabled")?,
+            monitor_interval_secs: row.try_get("monitor_interval_secs")?,
+            monitor_retention_days: row.try_get("monitor_retention_days")?,
         })
     }
 
@@ -1323,5 +1336,90 @@ fn duplicate_name(error: sqlx::Error, name: &str) -> Error {
             "a device named `{name}` already exists in this tenant"
         )),
         other => other.into(),
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Monitoring
+// ---------------------------------------------------------------------------
+
+impl Db {
+    /// Store one sweep of monitor samples. One statement per sample: a sweep
+    /// is small (one row per enabled device per interval), and per-row inserts
+    /// keep a single bad row from costing the whole batch.
+    pub async fn insert_samples(&self, samples: &[crate::monitor::Sample]) -> Result<()> {
+        for sample in samples {
+            sqlx::query(
+                "INSERT INTO device_samples
+                     (id, device_id, captured_at, cpu_load, free_memory, total_memory,
+                      free_hdd, total_hdd, uptime_secs, voltage, temperature, extra)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+            )
+            .bind(uuid::Uuid::new_v4())
+            .bind(sample.device_id)
+            .bind(sample.captured_at)
+            .bind(sample.cpu_load)
+            .bind(sample.free_memory)
+            .bind(sample.total_memory)
+            .bind(sample.free_hdd)
+            .bind(sample.total_hdd)
+            .bind(sample.uptime_secs)
+            .bind(sample.voltage)
+            .bind(sample.temperature)
+            .bind(&sample.extra)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Latest sample per device, for the dashboard.
+    pub async fn latest_samples(&self) -> Result<Vec<crate::monitor::Sample>> {
+        let rows = sqlx::query(
+            "SELECT s.device_id, s.captured_at, s.cpu_load, s.free_memory, s.total_memory,
+                    s.free_hdd, s.total_hdd, s.uptime_secs, s.voltage, s.temperature,
+                    s.extra, d.name AS device, t.slug AS tenant
+               FROM device_samples s
+               JOIN devices d ON d.id = s.device_id
+               JOIN tenants t ON t.id = d.tenant_id
+              WHERE s.captured_at = (
+                    SELECT max(captured_at) FROM device_samples
+                     WHERE device_id = s.device_id)
+              ORDER BY t.slug, d.name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                Ok(crate::monitor::Sample {
+                    device_id: row.try_get("device_id")?,
+                    device: row.try_get("device")?,
+                    tenant: row.try_get("tenant")?,
+                    captured_at: row.try_get("captured_at")?,
+                    cpu_load: row.try_get("cpu_load")?,
+                    free_memory: row.try_get("free_memory")?,
+                    total_memory: row.try_get("total_memory")?,
+                    free_hdd: row.try_get("free_hdd")?,
+                    total_hdd: row.try_get("total_hdd")?,
+                    uptime_secs: row.try_get("uptime_secs")?,
+                    voltage: row.try_get("voltage")?,
+                    temperature: row.try_get("temperature")?,
+                    extra: row.try_get("extra")?,
+                })
+            })
+            .collect()
+    }
+
+    /// Drop samples older than the retention window. Called from the monitor
+    /// loop; safe to run as often as every tick.
+    pub async fn prune_samples(&self, retention_days: i32) -> Result<u64> {
+        let result = sqlx::query(
+            "DELETE FROM device_samples WHERE captured_at < now() - ($1 || ' days')::interval",
+        )
+        .bind(retention_days.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 }

@@ -10,8 +10,15 @@ Git repository with the device name, firmware and capture time in the commit
 message, and pushes once per run. Devices, credentials, the GitHub repository and
 the nightly schedule are all managed in the browser.
 
-Planned: RouterOS state monitoring, SNMP, safe-mode config pushes with automatic
-rollback, firmware management, and SRP-6a zero-knowledge auth.
+**Phase 2 (first slice: device-state monitoring).** DonDude polls every
+enabled device on a configurable interval (default 60 s) over the same SSH
+transport the backups use, and records CPU load, memory, disk, uptime and board
+health to PostgreSQL with a retention window. Enable it in **Settings →
+Monitoring** or try it once with `dondude monitor poll`.
+
+Planned next: live dashboard charts and alerting on this data, SNMP, safe-mode
+config pushes with automatic rollback, firmware management, and SRP-6a
+zero-knowledge auth.
 
 ## Quick start
 
@@ -166,6 +173,7 @@ docker compose exec app dondude fleet list
 docker compose exec app dondude device test core-rtr-01
 docker compose exec app dondude backup run --dry-run
 docker compose exec app dondude backup run --tag core
+dondude monitor poll
 docker compose exec app dondude settings show
 docker compose exec app dondude db check
 ```

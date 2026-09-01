@@ -69,6 +69,13 @@ enum Command {
         action: BackupCommand,
     },
 
+    /// Poll device state once and print the samples (no web server needed).
+    #[command(subcommand_required = true, arg_required_else_help = true)]
+    Monitor {
+        #[command(subcommand)]
+        action: MonitorCommand,
+    },
+
     /// Interact with a single device.
     #[command(subcommand_required = true, arg_required_else_help = true)]
     Device {
@@ -117,6 +124,12 @@ struct ServeArgs {
     /// Start without applying pending migrations.
     #[arg(long)]
     skip_migrations: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum MonitorCommand {
+    /// Sample every enabled device once and report.
+    Poll,
 }
 
 #[derive(Debug, Subcommand)]
@@ -365,6 +378,9 @@ async fn dispatch(cli: Cli) -> Result<ExitCode> {
         Command::Device {
             action: DeviceCommand::Test { name },
         } => device_test(&name).await,
+        Command::Monitor {
+            action: MonitorCommand::Poll,
+        } => monitor_poll().await,
         Command::Backup {
             action: BackupCommand::Run(args),
         } => backup_run(args).await,
@@ -430,7 +446,8 @@ async fn serve(args: ServeArgs) -> Result<ExitCode> {
         .unwrap_or_else(|| DEFAULT_BIND.to_string());
 
     let state = AppState::new(db, repo_path);
-    web::spawn_scheduler(state.clone());
+    web::spawn_monitor(state.clone());
+    crate::web::spawn_scheduler(state.clone());
     web::serve(&bind, state).await?;
     Ok(ExitCode::SUCCESS)
 }
@@ -935,5 +952,38 @@ async fn db_command(action: DbCommand) -> Result<ExitCode> {
             println!("Operators: {}", db.user_count().await?);
         }
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+
+/// One-shot monitoring sweep, for cron or a first look at the fleet.
+async fn monitor_poll() -> Result<ExitCode> {
+    let db = connect().await?;
+    let config = db.runtime_config(repo_path()).await?;
+    let report = mikrotik_dondude::monitor::poll_fleet(&db, &config).await;
+
+    for sample in &report.samples {
+        let mem = match (sample.free_memory, sample.total_memory) {
+            (Some(free), Some(total)) if total > 0 => {
+                format!("mem {}%", 100 - (free * 100 / total))
+            }
+            _ => "-".to_string(),
+        };
+        let uptime = sample
+            .uptime_secs
+            .map(|s| format!("up {}d {}h", s / 86400, (s % 86400) / 3600))
+            .unwrap_or_else(|| "-".to_string());
+        println!(
+            "{:<24} cpu {:>3}%  {:<10}  {}",
+            sample.device,
+            sample.cpu_load.unwrap_or(0),
+            mem,
+            uptime
+        );
+    }
+    for failure in &report.failures {
+        println!("{:<24} FAILED: {}", failure.device, failure.error);
+    }
+    println!("{}", report.describe());
     Ok(ExitCode::SUCCESS)
 }

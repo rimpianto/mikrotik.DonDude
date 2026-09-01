@@ -664,6 +664,9 @@ pub struct SettingsForm {
     schedule_enabled: Option<String>,
     schedule_hour: String,
     schedule_minute: String,
+    monitor_enabled: Option<String>,
+    monitor_interval_secs: String,
+    monitor_retention_days: String,
     concurrency: String,
     connect_timeout_secs: String,
     command_timeout_secs: String,
@@ -711,6 +714,9 @@ impl SettingsForm {
             schedule_enabled: self.schedule_enabled.is_some(),
             schedule_hour: number(&self.schedule_hour, 2, 0, 23),
             schedule_minute: number(&self.schedule_minute, 30, 0, 59),
+            monitor_enabled: self.monitor_enabled.is_some(),
+            monitor_interval_secs: number(&self.monitor_interval_secs, 60, 10, 3600),
+            monitor_retention_days: number(&self.monitor_retention_days, 30, 1, 3650),
             allow_invalid_certs: self.allow_invalid_certs.is_some(),
         }
     }

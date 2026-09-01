@@ -66,6 +66,9 @@ fn settings_input(token: Option<&str>) -> SettingsInput {
         schedule_enabled: true,
         schedule_hour: 3,
         schedule_minute: 15,
+        monitor_enabled: true,
+        monitor_interval_secs: 60,
+        monitor_retention_days: 30,
         allow_invalid_certs: false,
     }
 }

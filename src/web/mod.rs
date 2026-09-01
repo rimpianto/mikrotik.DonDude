@@ -241,3 +241,62 @@ async fn scheduler_tick(state: &AppState) -> Result<()> {
     }
     Ok(())
 }
+
+
+/// Background device-state monitoring.
+///
+/// Same shape as the scheduler: wake, read settings, decide. Polling only
+/// happens while `monitor_enabled` is on, so the operator's toggle in Settings
+/// takes effect within one interval without a restart. The interval itself is
+/// read fresh every tick for the same reason.
+///
+/// Retention pruning runs alongside polling, but rarely: once a day is plenty,
+/// and pruning eagerly after every sweep would delete nothing 143 times out of
+/// 144 while holding a write lock.
+pub fn spawn_monitor(state: AppState) {
+    tokio::spawn(async move {
+        let mut pruned = chrono::Utc::now().date_naive();
+        loop {
+            let wait = match monitor_tick(state.clone()).await {
+                Ok(interval) => interval,
+                Err(error) => {
+                    tracing::warn!("{}", crate::error::chain(&error));
+                    60
+                }
+            };
+            if chrono::Utc::now().date_naive() != pruned {
+                pruned = chrono::Utc::now().date_naive();
+                if let Ok(settings) = state.db.settings().await {
+                    match state.db.prune_samples(settings.monitor_retention_days).await {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!(n, "pruned old monitor samples"),
+                        Err(error) => {
+                            tracing::warn!("{}", crate::error::chain(&error))
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(wait.max(1) as u64)).await;
+        }
+    });
+}
+
+/// One sweep, or nothing if monitoring is off. Returns the seconds to wait
+/// before the next tick.
+async fn monitor_tick(state: AppState) -> Result<u32> {
+    let settings = state.db.settings().await?;
+    if !settings.monitor_enabled {
+        return Ok(30);
+    }
+    let interval = settings.monitor_interval_secs.max(10);
+
+    let config = state
+        .db
+        .runtime_config(state.repo_path.clone())
+        .await?;
+    let report = crate::monitor::poll_fleet(&state.db, &config).await;
+    for failure in &report.failures {
+        tracing::debug!(device = %failure.device, %failure.error, "monitor poll failed");
+    }
+    Ok(interval as u32)
+}

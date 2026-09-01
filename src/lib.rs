@@ -34,6 +34,7 @@ pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod git;
+pub mod monitor;
 pub mod routeros;
 pub mod web;
 

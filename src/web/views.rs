@@ -1007,6 +1007,25 @@ pub fn settings(
                             "Minute"
                             input type="number" name="schedule_minute" min="0" max="59"
                                 value=(settings.schedule_minute);
+
+        fieldset {
+            legend { "Monitoring" }
+            label {
+                input type="checkbox" name="monitor_enabled" value="1"
+                    checked[settings.monitor_enabled];
+                " Poll device state"
+            }
+            p.small {
+                "Samples CPU, memory, disk, uptime and board health from every enabled
+                 device over SSH, and keeps the history for the charts."
+            }
+            label { "Interval (seconds)" }
+            input type="number" name="monitor_interval_secs" min="10" max="3600"
+                value=(settings.monitor_interval_secs);
+            label { "Retention (days)" }
+            input type="number" name="monitor_retention_days" min="1" max="3650"
+                value=(settings.monitor_retention_days);
+        }
                         }
                     }
                     div.hint { "Times are UTC, so they do not shift with daylight saving." }
