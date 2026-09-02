@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.2] - 2026-09-02
+
+### Added
+- Release pipeline (`.github/workflows/release.yml`): pushing a `vX.Y.Z` tag
+  builds signed-checksummed `dondude` binaries for linux/amd64 and
+  linux/arm64 (native runners), publishes a multi-arch container image to
+  GHCR (`ghcr.io/rimpianto/mikrotik.dondude`), and creates the GitHub release
+  with these notes taken from this changelog.
+- README shows the current version with a link to the releases page.
+
 ## [0.4.1] - 2026-09-02
 
 ### Added

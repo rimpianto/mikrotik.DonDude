@@ -116,15 +116,33 @@ jobs:
     needs: [binaries, image]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           pattern: bins-*
           merge-multiple: true
 
+      # The release notes are the matching section of CHANGELOG.md, with
+      # GitHub's commit list appended automatically.
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v ver="$ver" '
+            $0 == index($0, "## [" ver "]") == 1 { inside=1; next }
+            inside && /^## \[/ { inside=0 }
+            inside { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "No CHANGELOG.md entry for $ver — falling back to generated notes."
+            echo "See CHANGELOG.md for details." > notes.md
+          fi
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: notes.md
           generate_release_notes: true
           fail_on_unreleased_commits: false
           files: |
