@@ -1,5 +1,8 @@
 # mikrotik.DonDude
 
+New here? [READMEFIRST.md](READMEFIRST.md) picks the right path
+(just running DonDude vs working on the source code).
+
 Multi-tenant management platform for MikroTik RouterOS fleets, with a web
 interface. A modular Rust rewrite of *the-other-dude*.
 
