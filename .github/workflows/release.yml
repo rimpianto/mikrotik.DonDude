@@ -4,9 +4,10 @@
 # image to GHCR and creates the GitHub release with binaries + SHA256
 # checksums and notes taken from CHANGELOG.md.
 #
-# Runners (labels are the GitHub defaults for self-hosted runners):
-#   - WSL Claude_IDF  (Linux ARM64) -> binaries aarch64 + image arm64
-#   - lxc-dondude     (Linux X64)    -> binaries x86_64 + image amd64
+# The binaries and the container image are built by self-hosted runners on
+# native machines (no QEMU emulation):
+#   - one Linux ARM64 machine -> binaries aarch64 + image arm64
+#   - one Linux X64 machine   -> binaries x86_64 + image amd64
 #
 # Note: the container repository name must be lowercase; the repo name
 # ("mikrotik.DonDude") is not, so every reference lowercases it first.
