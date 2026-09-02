@@ -103,6 +103,14 @@ pre.diff .head { color: var(--muted); }
 .stat { font-size: 26px; font-weight: 700; }
 .empty { color: var(--muted); text-align: center; padding: 28px 0; }
 details.chip-help { display: inline-block; }
+details.chip-help .cmd { display: flex; gap: 6px; align-items: flex-start;
+  margin: 8px 0 0; max-width: 680px; }
+details.chip-help .cmd pre { flex: 1; margin: 0; padding: 10px 12px; border-radius: 6px;
+  text-align: left; border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  white-space: pre-wrap; user-select: all; cursor: text; }
+details.chip-help .cmd button { flex: none; font-size: 12px; padding: 6px 10px; }
+details.chip-help > p { margin: 8px 0 0; max-width: 680px; text-align: left; }
 details.chip-help > pre {
   margin: 8px 0 0; padding: 10px 12px; border-radius: 6px; text-align: left;
   border: 1px solid var(--line); background: var(--bg); color: var(--text);
@@ -1175,17 +1183,36 @@ fn binary_backup_chip(bytes: Option<u64>) -> Markup {
         None => html! {
             details.chip-help {
                 summary.badge.warn { "Binary backup: none — how to enable" }
-                pre {
-                    "No binary backup file was found on the router. DonDude downloads
-the file the router itself creates, so the MikroTik must be told to generate
-it. Run these commands in the router's terminal:
-
-1) Create the scheduler for the daily automated backup:
-/system scheduler add name=DailyBinaryBackup interval=1d start-time=03:00:00 \
-    on-event=\"/system backup save name=AutomatedBinaryBackup dont-encrypt=yes\"
-
-2) Generate the first backup immediately:
-/system backup save name=AutomatedBinaryBackup dont-encrypt=yes"
+                p { "No binary backup file was found on the router. DonDude downloads
+                    the file the router itself creates, so the MikroTik must be told
+                    to generate it. Run these commands in the router's terminal:" }
+                div.cmd {
+                    pre id="dd-cmd-sched" {
+                        "/system scheduler add name=DailyBinaryBackup interval=1d start-time=03:00:00 \
+        on-event=\"/system backup save name=AutomatedBinaryBackup dont-encrypt=yes\""
+                    }
+                    button title="Copy scheduler command"
+                        onclick="navigator.clipboard.writeText(document.getElementById('dd-cmd-sched').innerText)"
+                        { "Copy" }
+                }
+                div.cmd {
+                    pre id="dd-cmd-save" {
+                        "/system backup save name=AutomatedBinaryBackup dont-encrypt=yes"
+                    }
+                    button title="Copy backup command"
+                        onclick="navigator.clipboard.writeText(document.getElementById('dd-cmd-save').innerText)"
+                        { "Copy" }
+                }
+                p { "Also make sure the user DonDude connects with has the "
+                    code { "ftp" } " policy — the device file system is served by
+                    the FTP service, so SFTP/SCP downloads are denied without it:" }
+                div.cmd {
+                    pre id="dd-cmd-policy" {
+                        "/user group set <its-group> policy=ssh,ftp,read,sensitive"
+                    }
+                    button title="Copy policy command"
+                        onclick="navigator.clipboard.writeText(document.getElementById('dd-cmd-policy').innerText)"
+                        { "Copy" }
                 }
             }
         },
@@ -1576,6 +1603,8 @@ mod tests {
         // reference to a nonexistent Settings toggle.
         assert!(none.contains("/system scheduler add name=DailyBinaryBackup"));
         assert!(none.contains("/system backup save name=AutomatedBinaryBackup"));
+        assert!(none.contains("/user group set"));
+        assert!(none.contains("Copy"));
         assert!(!none.contains("in Settings"));
     }
 

@@ -362,7 +362,11 @@ async fn backup_download_route() {
             "username=admin&password=supersecret1&confirm=supersecret1".to_string(),
         )
         .await;
-    assert_eq!(reply.location.as_deref(), Some("/"), "setup must sign us in");
+    assert_eq!(
+        reply.location.as_deref(),
+        Some("/"),
+        "setup must sign us in"
+    );
 
     // No session: bounced to the login page, nothing leaks.
     let _ = client;
@@ -371,7 +375,11 @@ async fn backup_download_route() {
         cookie: None,
     };
     let reply = anon.get("/backup").await;
-    assert_eq!(reply.location.as_deref(), Some("/login"), "must require login");
+    assert_eq!(
+        reply.location.as_deref(),
+        Some("/login"),
+        "must require login"
+    );
 
     // Signed in: the settings page carries the download button...
     let reply = client.get("/settings").await;

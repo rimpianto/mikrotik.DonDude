@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.6] - 2026-09-03
+
+### Fixed
+- Binary-backup diagnostics: the "not found" log now distinguishes the cause —
+  a refused download (ssh2 -13) points at the missing `ftp` policy in the
+  user's group, a missing file (ssh2 -28) points at the `DailyBinaryBackup`
+  scheduler commands — instead of always suggesting the scheduler.
+- The binary-backup help block on the device page renders each RouterOS
+  command in its own copyable block with a Copy button (clipboard API), and
+  includes the `/user group set ... policy=ssh,ftp,read,sensitive` command
+  for the permission case.
+
 ## [0.4.5] - 2026-09-03
 
 ### Added

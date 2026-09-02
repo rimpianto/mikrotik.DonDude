@@ -111,17 +111,28 @@ pub async fn capture(
         );
 
         // The binary backup is best-effort: a missing file or a device without
-        // the scheduler entry costs the `.rsc` capture nothing.
+        // the scheduler entry costs the `.rsc` capture nothing. The help text
+        // differs by cause: a permission denial means the group policy lacks
+        // `ftp` (the device file system *is* the FTP service), a missing file
+        // means the scheduler entry was never added.
         let binary_backup = match session.download_file(BINARY_BACKUP_FILE) {
             Ok(bytes) => Some(bytes),
             Err(error) => {
-                warn!(
-                    host = %error_host,
-                    %error,
-                    "Binary backup not found. To enable it, run this command on the router: \
+                let text = error.to_string();
+                let hint = if text.contains("(-13)") {
+                    "the download was refused: the user's group policy probably \
+                     lacks `ftp` (required for SFTP/SCP). On the router: \
+                     /user group set <group> policy=ssh,ftp,read,sensitive"
+                } else if text.contains("(-28)") {
+                    "the file does not exist yet: create the daily scheduler \
                      /system scheduler add name=DailyBinaryBackup interval=1d start-time=03:00:00 \
-                     on-event='/system backup save name=AutomatedBinaryBackup dont-encrypt=yes'"
-                );
+                     on-event='/system backup save name=AutomatedBinaryBackup dont-encrypt=yes' \
+                     then run /system backup save name=AutomatedBinaryBackup dont-encrypt=yes"
+                } else {
+                    "check that the user's group policy includes ssh,ftp,read,sensitive \
+                     and that AutomatedBinaryBackup.backup exists on the device"
+                };
+                warn!(host = %error_host, %error, "Binary backup unavailable. {hint}");
                 None
             }
         };
