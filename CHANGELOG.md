@@ -8,10 +8,28 @@
   output is kept verbatim at the top of the `.rsc` between the stable header
   block and the configuration body.
 - Binary backup download: after the text export, DonDude attempts to fetch
-  `AutomatedBinaryBackup.backup` from the device over the same SSH session and
-  commits it next to the `.rsc` as its own commit. A missing file is a warning,
-  never a failed run — the log tells you how to enable the daily scheduler on
-  the router.
+  `AutomatedBinaryBackup.backup` from the device (SFTP first, legacy SCP as
+  fallback) and commits it next to the `.rsc` as its own commit. A missing file
+  is a warning, never a failed run — the log tells you how to enable the daily
+  scheduler on the router. Requires `ftp,sensitive` in the device's group
+  policies (documented).
+- Monitoring UI: the device page has a Monitoring section — a server-rendered
+  SVG sparkline (CPU load and free memory in separate bands, no JavaScript)
+  and a table of recent samples with used/total percentages and temperature.
+- Dashboard: per-device CPU badge from the latest monitor sample, and a
+  Binary column showing whether a `.backup` file is stored.
+- Binary-backup status chip on the device page.
+
+### Fixed
+- Settings form did not persist the monitoring fields: enable/interval/
+  retention were read but never written, so the toggle appeared to reset
+  itself after saving.
+- Monitor parser: `cpu-load` is a percentage (the `%` broke the parse) and
+  RouterOS 7 `/system health print` is a columnar table — both are now parsed,
+  so CPU load and board temperature are sampled.
+- Sparkline: flat series drew no line at all, and the SVG elements were
+  emitted unterminated in HTML mode, which made the browser swallow every
+  series after the first.
 
 ## [0.4.2] - 2026-09-02
 
