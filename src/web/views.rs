@@ -321,7 +321,7 @@ pub fn dashboard(
                     table {
                         thead { tr {
                             th { "Device" } th { "Address" } th { "Tenant" }
-                            th { "Firmware" } th { "CPU" } th { "Binary" }
+                            th { "CPU" } th { "Binary" } th { "Firmware" }
                             th { "Last result" } th { "Last seen" }
                         } }
                         tbody { @for device in devices {
@@ -1194,7 +1194,7 @@ fn monitoring_section(samples: &[Sample]) -> Markup {
             table {
                 thead { tr {
                     th { "Time" } th { "CPU load" } th { "Free memory" }
-                    th { "Free disk" } th { "Uptime" } th { "Temperature" }
+                    th { "Free disk" } th { "Uptime" } th { "Temp (°C)" }
                 } }
                 tbody { @for sample in samples.iter().rev().take(10) {
                     tr {
@@ -1321,9 +1321,27 @@ fn points_attr(points: &[(f64, f64)]) -> String {
 /// "128 MiB / 256 MiB", or a dash when the reading is missing.
 fn bytes_pair(free: Option<i64>, total: Option<i64>) -> Markup {
     match (free, total) {
-        (Some(free), Some(total)) => html! { (human_bytes(free)) " / " (human_bytes(total)) },
+        (Some(free), Some(total)) if total > 0 => {
+            // Free and used, with the used share — the number an operator
+            // actually watches. "49.7 MiB free · 81% used".
+            let used_pct = ((total - free) * 100) / total;
+            html! {
+                (human_bytes(free)) " free · "
+                span.badge.(pct_class(used_pct)) { (used_pct) "% used" }
+            }
+        }
+        (Some(free), Some(_)) => html! { (human_bytes(free)) },
         (Some(free), None) => html! { (human_bytes(free)) },
         _ => html! { span.muted { "—" } },
+    }
+}
+
+/// Colour bucket for a used-percentage badge: comfortable, watch, tight.
+fn pct_class(pct: i64) -> &'static str {
+    match pct {
+        0..=79 => "ok",
+        80..=89 => "warn",
+        _ => "bad",
     }
 }
 
