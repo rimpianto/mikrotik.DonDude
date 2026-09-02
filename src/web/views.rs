@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::db::{DeviceRow, EventRow, RunRow, Settings, User};
 use crate::git::{DiffKind, DiffLine, HistoryEntry};
+use crate::monitor::Sample;
 use crate::web::runner::Live;
 
 const STYLE: &str = r#"
@@ -248,6 +249,7 @@ pub fn dashboard(
     live: Option<&Live>,
     remote_configured: bool,
     repo_path: &str,
+    samples: &[Sample],
 ) -> Markup {
     let enabled = devices.iter().filter(|device| device.enabled).count();
     let failing = devices
@@ -318,7 +320,7 @@ pub fn dashboard(
                     table {
                         thead { tr {
                             th { "Device" } th { "Address" } th { "Tenant" }
-                            th { "Firmware" } th { "Last result" } th { "Last seen" }
+                            th { "Firmware" } th { "CPU" } th { "Last result" } th { "Last seen" }
                         } }
                         tbody { @for device in devices {
                             tr {
@@ -328,6 +330,7 @@ pub fn dashboard(
                                 }
                                 td.mono { (device.addr()) }
                                 td { (device.tenant) }
+                                td { (cpu_badge(samples.iter().find(|s| s.device_id == device.id))) }
                                 td.mono { (option(device.firmware.as_deref())) }
                                 td { (outcome_badge(device.last_outcome.as_deref())) }
                                 td.muted { (option_time(device.last_seen_at)) }
@@ -549,6 +552,8 @@ pub fn device_history(
     events: &[EventRow],
     flash: Option<&str>,
     warning: Option<&str>,
+    samples: &[Sample],
+    binary_backup: Option<u64>,
 ) -> Markup {
     layout(
         &device.name,
@@ -558,7 +563,10 @@ pub fn device_history(
             div style="display:flex;justify-content:space-between;align-items:center" {
                 div {
                     h1 { (device.name) }
-                    p.sub { span.mono { (device.addr()) } " · " (device.tenant) }
+                    p.sub {
+                        span.mono { (device.addr()) } " · " (device.tenant) " · "
+                        (binary_backup_chip(binary_backup))
+                    }
                 }
                 div.actions {
                     form.inline method="post" action={ "/devices/" (device.id) "/backup" } {
@@ -620,6 +628,9 @@ pub fn device_history(
                     }
                 }
             }
+
+            h2 { "Monitoring" }
+            (monitoring_section(samples))
 
             h2 { "Recent runs" }
             div.card {
@@ -1100,6 +1111,231 @@ pub fn error_page(user: Option<&User>, title: &str, message: &str) -> Markup {
 // Small helpers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Monitoring widgets
+// ---------------------------------------------------------------------------
+
+/// Sparkline viewport: width x height in SVG user units.
+const SPARK_W: u32 = 560;
+const SPARK_H: u32 = 120;
+const SPARK_PAD: u32 = 4;
+
+/// CPU badge color bucket, shared by the dashboard badge and the sample
+/// table so the two never disagree about what "high" means.
+fn cpu_class(cpu: i32) -> &'static str {
+    match cpu {
+        0..=49 => "ok",
+        50..=79 => "warn",
+        _ => "bad",
+    }
+}
+
+/// Per-device CPU badge for the dashboard, fed from `latest_samples`.
+/// `None` means the device has no sample yet — rendered as a quiet dash.
+fn cpu_badge(latest: Option<&Sample>) -> Markup {
+    match latest.and_then(|s| s.cpu_load) {
+        Some(cpu) => html! { span.badge.(cpu_class(cpu)) { (cpu) "%" } },
+        None => html! { span.muted { "—" } },
+    }
+}
+
+/// Binary-backup chip for the device page header. The size is the number of
+/// bytes on disk in the repository working tree.
+fn binary_backup_chip(bytes: Option<u64>) -> Markup {
+    match bytes {
+        Some(bytes) => html! {
+            span.badge.ok { "Binary backup: present (" (bytes / 1024) " KB)" }
+        },
+        None => html! {
+            span.badge.warn {
+                "Binary backup: none — enable AutomatedBinaryBackup.backup in Settings to keep one"
+            }
+        },
+    }
+}
+
+/// The whole Monitoring section of the device page: sparkline plus the table
+/// of the most recent samples, or the empty state that points at Settings.
+fn monitoring_section(samples: &[Sample]) -> Markup {
+    if samples.is_empty() {
+        return html! {
+            div.card {
+                div.empty {
+                    "No monitor samples yet. Enable Poll device state in "
+                    a href="/settings" { "Settings" }
+                    "."
+                }
+            }
+        };
+    }
+    let memory = memory_free_series(samples);
+    let cpu_label = min_max_label(samples.iter().filter_map(|s| s.cpu_load.map(i64::from)))
+        .unwrap_or_else(|| "—".into());
+    let memory_label = min_max_label(memory.iter().copied()).unwrap_or_else(|| "—".into());
+    html! {
+        div.card {
+            div.muted { "CPU load and free memory over the last " (samples.len()) " samples" }
+            (sparkline(samples))
+            div.hint { "CPU " (cpu_label) " · free memory " (memory_label) }
+        }
+        div.card {
+            table {
+                thead { tr {
+                    th { "Time" } th { "CPU load" } th { "Free memory" }
+                    th { "Free disk" } th { "Uptime" } th { "Voltage" }
+                } }
+                tbody { @for sample in samples.iter().rev().take(10) {
+                    tr {
+                        td.muted { (time(sample.captured_at)) }
+                        td {
+                            @if let Some(cpu) = sample.cpu_load {
+                                span.badge.(cpu_class(cpu)) { (cpu) "%" }
+                            } @else { span.muted { "—" } }
+                        }
+                        td.mono { (bytes_pair(sample.free_memory, sample.total_memory)) }
+                        td.mono { (bytes_pair(sample.free_hdd, sample.total_hdd)) }
+                        td.muted { (uptime(sample.uptime_secs)) }
+                        td.mono { (volts(sample.voltage)) }
+                    }
+                } }
+            }
+        }
+    }
+}
+
+/// The samples that have a free-memory reading, oldest first.
+fn memory_free_series(samples: &[Sample]) -> Vec<i64> {
+    samples.iter().filter_map(|s| s.free_memory).collect()
+}
+
+/// "min 12% · max 97%" label text for a series, or `None` when it is empty.
+fn min_max_label(series: impl Iterator<Item = i64>) -> Option<String> {
+    let (min, max) = series.fold(None::<(i64, i64)>, |acc, v| match acc {
+        None => Some((v, v)),
+        Some((lo, hi)) => Some((lo.min(v), hi.max(v))),
+    })?;
+    Some(format!(
+        "min {} · max {}",
+        human_bytes(min),
+        human_bytes(max)
+    ))
+}
+
+/// One inline SVG sparkline: one polyline per series, no JavaScript, no
+/// external assets. Points are computed server-side by [`spark_points`].
+fn sparkline(samples: &[Sample]) -> Markup {
+    let cpu: Vec<i64> = samples
+        .iter()
+        .filter_map(|s| s.cpu_load.map(i64::from))
+        .collect();
+    let memory = memory_free_series(samples);
+    let cpu_points = spark_points(&cpu, 0, 100, SPARK_W, SPARK_H, SPARK_PAD);
+    let mem_min = memory.iter().copied().min().unwrap_or(0);
+    let mem_max = memory.iter().copied().max().unwrap_or(1).max(mem_min + 1);
+    let memory_points = spark_points(&memory, mem_min, mem_max, SPARK_W, SPARK_H, SPARK_PAD);
+    html! {
+        svg xmlns="http://www.w3.org/2000/svg" viewBox={
+            "0 0 " (SPARK_W) " " (SPARK_H)
+        } role="img" aria-label="CPU load and free memory sparkline"
+            style="width:100%;max-width:560px;height:auto;display:block;margin:10px 0" {
+            @if !cpu_points.is_empty() {
+                polyline points=(points_attr(&cpu_points))
+                    fill="none" stroke="#4c8dff" stroke-width="2";
+            }
+            @if !memory_points.is_empty() {
+                polyline points=(points_attr(&memory_points))
+                    fill="none" stroke="#3fb950" stroke-width="1.5"
+                    stroke-dasharray="4 3" opacity="0.8";
+            }
+        }
+        div.row {
+            div.hint { span style="color:#4c8dff" { "▬" } " CPU load (%)" }
+            @if !memory_points.is_empty() {
+                div.hint { span style="color:#3fb950" { "▬" } " free memory" }
+            }
+        }
+    }
+}
+
+/// Map a series onto the sparkline viewport. Values are clamped to
+/// `[min, max]`; with fewer than two points the series has no line to
+/// draw, so the caller skips it. Pure function — unit-tested.
+fn spark_points(series: &[i64], min: i64, max: i64, w: u32, h: u32, pad: u32) -> Vec<(f64, f64)> {
+    if series.is_empty() || max <= min {
+        return Vec::new();
+    }
+    let span = (max - min) as f64;
+    let step = if series.len() > 1 {
+        (w - 2 * pad) as f64 / (series.len() - 1) as f64
+    } else {
+        0.0
+    };
+    series
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            let x = pad as f64 + i as f64 * step;
+            let clamped = v.clamp(min, max) as f64;
+            let y = pad as f64 + (1.0 - (clamped - min as f64) / span) * (h - 2 * pad) as f64;
+            (x, y)
+        })
+        .collect()
+}
+
+/// SVG `points` attribute: "x1,y1 x2,y2 ...".
+fn points_attr(points: &[(f64, f64)]) -> String {
+    points
+        .iter()
+        .map(|(x, y)| format!("{:.1},{:.1}", x, y))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// "128 MiB / 256 MiB", or a dash when the reading is missing.
+fn bytes_pair(free: Option<i64>, total: Option<i64>) -> Markup {
+    match (free, total) {
+        (Some(free), Some(total)) => html! { (human_bytes(free)) " / " (human_bytes(total)) },
+        (Some(free), None) => html! { (human_bytes(free)) },
+        _ => html! { span.muted { "—" } },
+    }
+}
+
+/// Human-readable byte count: binary prefixes, one fraction digit.
+fn human_bytes(bytes: i64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", bytes, UNITS[0])
+    } else {
+        format!("{:.1} {}", value, UNITS[unit])
+    }
+}
+
+/// "3d 4h 12m", or a dash when the router did not report uptime.
+fn uptime(secs: Option<i64>) -> Markup {
+    match secs {
+        Some(secs) => {
+            let (days, rem) = (secs / 86_400, secs % 86_400);
+            let (hours, mins) = (rem / 3_600, rem % 3_600 / 60);
+            html! { (days) "d " (hours) "h " (mins) "m" }
+        }
+        None => html! { span.muted { "—" } },
+    }
+}
+
+/// "24.1 V", or a dash when the board has no voltage sensor.
+fn volts(value: Option<f64>) -> Markup {
+    match value {
+        Some(value) => html! { (format!("{:.1} V", value)) },
+        None => html! { span.muted { "—" } },
+    }
+}
+
 fn option(value: Option<&str>) -> Markup {
     match value.map(str::trim).filter(|text| !text.is_empty()) {
         Some(text) => html! { (text) },
@@ -1141,4 +1377,96 @@ fn run_summary(row: &RunRow) -> String {
         "{} changed, {} unchanged, {} failed",
         row.changed, row.unchanged, row.failed
     )
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(cpu: Option<i32>) -> Sample {
+        Sample {
+            device_id: Uuid::new_v4(),
+            device: "r1".into(),
+            tenant: "t".into(),
+            captured_at: Utc::now(),
+            cpu_load: cpu,
+            free_memory: Some(1024),
+            total_memory: Some(2048),
+            free_hdd: None,
+            total_hdd: None,
+            uptime_secs: None,
+            voltage: None,
+            temperature: None,
+            extra: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn spark_points_maps_range_onto_viewport() {
+        // Two points at the extremes: first at the bottom, last at the top.
+        let points = spark_points(&[0, 100], 0, 100, 100, 50, 0);
+        assert_eq!(points.len(), 2);
+        assert!((points[0].1 - 50.0).abs() < 1e-9);
+        assert!((points[1].1 - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn spark_points_evenly_spaced_and_clamped() {
+        let points = spark_points(&[10, 50, 90, 500], 0, 100, 300, 100, 0);
+        assert_eq!(points.len(), 4);
+        assert!((points[1].0 - points[0].0 - 100.0).abs() < 1e-9);
+        // 500 is clamped to the max, so it lands on the top edge like 100.
+        assert!((points[3].1 - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn spark_points_degenerate_inputs_are_empty() {
+        assert!(spark_points(&[], 0, 100, 100, 50, 0).is_empty());
+        assert!(spark_points(&[1, 2], 5, 5, 100, 50, 0).is_empty());
+    }
+
+    #[test]
+    fn human_bytes_uses_binary_prefixes() {
+        assert_eq!(human_bytes(512), "512 B");
+        assert_eq!(human_bytes(2048), "2.0 KiB");
+        assert_eq!(human_bytes(10 * 1024 * 1024), "10.0 MiB");
+    }
+
+    #[test]
+    fn min_max_label_reports_both_ends() {
+        assert_eq!(
+            min_max_label([2048, 4096, 1024].into_iter()),
+            Some("min 1.0 KiB · max 4.0 KiB".into())
+        );
+        assert_eq!(min_max_label(std::iter::empty()), None);
+    }
+
+    #[test]
+    fn cpu_badge_renders_and_skips() {
+        let hot = cpu_badge(Some(&sample(Some(81)))).into_string();
+        assert!(hot.contains("81%") && hot.contains("bad"));
+        assert!(cpu_badge(None).into_string().contains("—"));
+        assert!(cpu_badge(Some(&sample(None))).into_string().contains("—"));
+    }
+
+    #[test]
+    fn binary_chip_states() {
+        assert!(
+            binary_backup_chip(Some(204_800))
+                .into_string()
+                .contains("200 KB")
+        );
+        let none = binary_backup_chip(None).into_string();
+        assert!(none.contains("none") && none.contains("AutomatedBinaryBackup"));
+    }
+
+    #[test]
+    fn monitoring_section_empty_state_points_at_settings() {
+        let html = monitoring_section(&[]).into_string();
+        assert!(html.contains("No monitor samples yet") && html.contains("/settings"));
+    }
 }

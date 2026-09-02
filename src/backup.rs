@@ -417,7 +417,7 @@ where
 }
 
 /// The `.backup` path for a `.rsc` path: same components, extension replaced.
-fn binary_sibling(path: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn binary_sibling(path: &std::path::Path) -> std::path::PathBuf {
     if path.extension().is_some() {
         path.with_extension("backup")
     } else {

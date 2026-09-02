@@ -1348,6 +1348,27 @@ fn duplicate_name(error: sqlx::Error, name: &str) -> Error {
 // Monitoring
 // ---------------------------------------------------------------------------
 
+/// Map a `device_samples` row (joined with device and tenant names) to a
+/// [`crate::monitor::Sample`]. Shared by every read query in this block so
+/// the column list cannot drift between them.
+fn sample_of_row(row: &sqlx::postgres::PgRow) -> Result<crate::monitor::Sample> {
+    Ok(crate::monitor::Sample {
+        device_id: row.try_get("device_id")?,
+        device: row.try_get("device")?,
+        tenant: row.try_get("tenant")?,
+        captured_at: row.try_get("captured_at")?,
+        cpu_load: row.try_get("cpu_load")?,
+        free_memory: row.try_get("free_memory")?,
+        total_memory: row.try_get("total_memory")?,
+        free_hdd: row.try_get("free_hdd")?,
+        total_hdd: row.try_get("total_hdd")?,
+        uptime_secs: row.try_get("uptime_secs")?,
+        voltage: row.try_get("voltage")?,
+        temperature: row.try_get("temperature")?,
+        extra: row.try_get("extra")?,
+    })
+}
+
 impl Db {
     /// Store one sweep of monitor samples. One statement per sample: a sweep
     /// is small (one row per enabled device per interval), and per-row inserts
@@ -1394,25 +1415,33 @@ impl Db {
         )
         .fetch_all(&self.pool)
         .await?;
-        rows.iter()
-            .map(|row| {
-                Ok(crate::monitor::Sample {
-                    device_id: row.try_get("device_id")?,
-                    device: row.try_get("device")?,
-                    tenant: row.try_get("tenant")?,
-                    captured_at: row.try_get("captured_at")?,
-                    cpu_load: row.try_get("cpu_load")?,
-                    free_memory: row.try_get("free_memory")?,
-                    total_memory: row.try_get("total_memory")?,
-                    free_hdd: row.try_get("free_hdd")?,
-                    total_hdd: row.try_get("total_hdd")?,
-                    uptime_secs: row.try_get("uptime_secs")?,
-                    voltage: row.try_get("voltage")?,
-                    temperature: row.try_get("temperature")?,
-                    extra: row.try_get("extra")?,
-                })
-            })
-            .collect()
+        rows.iter().map(sample_of_row).collect()
+    }
+
+    /// The most recent `limit` samples for one device, oldest first — the
+    /// natural order for a time-series chart.
+    pub async fn device_samples(
+        &self,
+        device_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<crate::monitor::Sample>> {
+        let rows = sqlx::query(
+            "SELECT s.device_id, s.captured_at, s.cpu_load, s.free_memory, s.total_memory,
+                    s.free_hdd, s.total_hdd, s.uptime_secs, s.voltage, s.temperature, s.extra,
+                    d.name AS device, t.slug AS tenant
+               FROM (
+                    SELECT * FROM device_samples WHERE device_id = $1
+                    ORDER BY captured_at DESC LIMIT $2
+               ) s
+               JOIN devices d ON d.id = s.device_id
+               JOIN tenants t ON t.id = d.tenant_id
+              ORDER BY s.captured_at ASC",
+        )
+        .bind(device_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(sample_of_row).collect()
     }
 
     /// Drop samples older than the retention window. Called from the monitor

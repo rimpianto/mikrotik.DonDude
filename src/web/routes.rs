@@ -270,6 +270,8 @@ pub async fn dashboard(State(state): State<AppState>, Operator(user): Operator) 
     let runs = state.db.recent_runs(8).await?;
     let settings = state.db.settings().await?;
     let live = state.runs.latest();
+    // Quietly skipped when monitoring is off: the dashboard renders a dash.
+    let samples = state.db.latest_samples().await.unwrap_or_default();
 
     Ok(page(views::dashboard(
         &user,
@@ -278,6 +280,7 @@ pub async fn dashboard(State(state): State<AppState>, Operator(user): Operator) 
         live.as_ref(),
         settings.remote_url.is_some(),
         &state.repo_path.display().to_string(),
+        &samples,
     )))
 }
 
@@ -455,6 +458,7 @@ async fn render_history(
     let settings = state.db.settings().await?;
     let relative = crate::db::backup_path_for(&device, &settings.path_template);
     let events = state.db.device_events(device.id, 10).await?;
+    let samples = state.db.device_samples(device.id, 30).await?;
 
     // The repository may not exist yet on a brand new deployment; an empty
     // history is the honest answer, not an error page.
@@ -466,6 +470,16 @@ async fn render_history(
         }
     };
 
+    // Binary backups live next to the text export in the working tree; a
+    // stat is all the status chip needs. Missing repo or file means "none".
+    let binary_backup = std::fs::metadata(
+        state
+            .repo_path
+            .join(crate::backup::binary_sibling(&relative)),
+    )
+    .ok()
+    .map(|m| m.len());
+
     Ok(page(views::device_history(
         user,
         &device,
@@ -474,6 +488,8 @@ async fn render_history(
         &events,
         flash,
         warning,
+        &samples,
+        binary_backup,
     )))
 }
 
