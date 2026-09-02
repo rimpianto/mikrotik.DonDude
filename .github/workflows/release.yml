@@ -1,9 +1,12 @@
-# Release pipeline: on a pushed tag (vX.Y.Z) it builds the `dondude` binary
-# for each Linux target, attaches binaries + SHA256 checksums to the GitHub
-# release, and publishes a multi-arch container image to GHCR.
+# Release pipeline: on a pushed tag (vX.Y.Z) the binaries and the container
+# image are built by self-hosted runners (native arch, no QEMU), then a
+# GitHub-hosted job merges the image manifests, publishes the multi-arch
+# image to GHCR and creates the GitHub release with binaries + SHA256
+# checksums and notes taken from CHANGELOG.md.
 #
-# Production update path: `docker compose pull && docker compose up -d`, or
-# download the binary + checksums from the release page.
+# Runners (labels are the GitHub defaults for self-hosted runners):
+#   - WSL Claude_IDF  (Linux ARM64) -> binaries aarch64 + image arm64
+#   - lxc-dondude     (Linux X64)    -> binaries x86_64 + image amd64
 name: release
 
 on:
@@ -21,65 +24,56 @@ env:
 
 jobs:
   binaries:
-    name: binary (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    name: binary (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
+          - name: x86_64-unknown-linux-gnu
+            runs-on: [self-hosted, Linux, X64]
+          - name: aarch64-unknown-linux-gnu
+            runs-on: [self-hosted, Linux, ARM64]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install cross-compile prerequisites
-        # libgit2/libssh2/OpenSSL are vendored and built from source; the arm64
-        # build on an arm64 runner compiles them natively, so no cross tooling
-        # is needed — only cmake/perl for the C parts.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential cmake perl
-
-      # Each target builds on a native runner, so no --target/cross toolchain:
-      # cargo picks the host C compiler, which is all the vendored C code
+      # Native build: the host C compiler is all the vendored C code
       # (libgit2/libssh2/OpenSSL) needs.
       - name: Build
         run: cargo build --release --locked
 
       - name: Package
         run: |
-          dir="dondude-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          dir="dondude-${GITHUB_REF_NAME}-${{ matrix.name }}"
           mkdir "$dir"
           cp target/release/dondude "$dir/"
           cp README.md CHANGELOG.md LICENSE "$dir/"
           tar -czf "$dir.tar.gz" "$dir"
           sha256sum "$dir.tar.gz" > "$dir.tar.gz.sha256"
-          # The vendored OpenSSL has no compiled-in certificate path; the binary
-          # needs SSL_CERT_FILE (or the env var documented in the README) at
-          # runtime, exactly like the container image.
-          echo "Built $dir.tar.gz"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: bins-${{ matrix.target }}
+          name: bins-${{ matrix.name }}
           path: |
             dondude-*.tar.gz
             dondude-*.sha256
 
   image:
-    name: container image (GHCR)
-    runs-on: ubuntu-latest
+    name: container image (${{ matrix.platform }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs-on: [self-hosted, Linux, X64]
+          - platform: linux/arm64
+            runs-on: [self-hosted, Linux, ARM64]
+    outputs:
+      digest-amd64: ${{ steps.push.outputs.digest }}
+      digest-arm64: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
@@ -90,26 +84,17 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern=latest
-
-      - uses: docker/build-push-action@v6
+      # Push each arch under a temporary tag; the publish job merges the
+      # digests into the final multi-arch tags.
+      - name: Build and push by digest
+        id: push
+        uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
           provenance: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,push=true
 
   publish:
     name: publish release
@@ -124,13 +109,25 @@ jobs:
           pattern: bins-*
           merge-multiple: true
 
+      - name: Merge multi-arch image and tag
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+          image="ghcr.io/${{ env.IMAGE_NAME }}"
+          ver="${GITHUB_REF_NAME#v}"
+          docker buildx imagetools create \
+            -t "$image:$ver" \
+            -t "$image:${ver%.*}" \
+            -t "$image:latest" \
+            "$image@${{ needs.image.outputs.digest-amd64 }}" \
+            "$image@${{ needs.image.outputs.digest-arm64 }}"
+
       # The release notes are the matching section of CHANGELOG.md, with
       # GitHub's commit list appended automatically.
       - name: Extract release notes from CHANGELOG.md
         run: |
           ver="${GITHUB_REF_NAME#v}"
           awk -v ver="$ver" '
-            $0 == index($0, "## [" ver "]") == 1 { inside=1; next }
+            index($0, "## [" ver "]") == 1 { inside=1; next }
             inside && /^## \[/ { inside=0 }
             inside { print }
           ' CHANGELOG.md > notes.md
