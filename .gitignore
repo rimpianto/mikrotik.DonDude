@@ -3,3 +3,5 @@
 # Local deployment secrets: the PostgreSQL password and the master key that
 # decrypts every stored credential.
 /.env
+*.dud
+.env.backup-*
