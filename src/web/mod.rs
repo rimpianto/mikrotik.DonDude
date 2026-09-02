@@ -143,6 +143,7 @@ pub fn router(state: AppState) -> Router {
             get(routes::settings_page).post(routes::save_settings),
         )
         .route("/settings/test", post(routes::test_remote))
+        .route("/backup", get(routes::download_backup))
         .fallback(routes::not_found)
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state)

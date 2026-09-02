@@ -873,6 +873,14 @@ pub fn settings(
             @if let Some(message) = flash { div.banner.ok { (message) } }
             @if let Some(message) = error { div.banner.err { (message) } }
 
+            div.card {
+                h2 { "Deployment backup" }
+                p { "Download the encrypted " code { ".dud" } " archive holding the whole
+                    database, plus " code { ".env" } " and " code { "known_hosts" } " when
+                    found. Restore anywhere with " code { "dondude db restore <file>" } "." }
+                a.btn href="/backup" { "Download backup (.dud)" }
+            }
+
             form method="post" action="/settings" {
                 h2 { "Backup repository" }
                 div.card {

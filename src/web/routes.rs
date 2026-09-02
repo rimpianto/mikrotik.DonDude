@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 
 use axum::Json;
 use axum::extract::{ConnectInfo, Path, Query, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use maud::Markup;
 use serde::Deserialize;
@@ -775,6 +775,38 @@ pub async fn save_settings(
             )))
         }
     }
+}
+
+/// Serve the fleet backup as a download: the same encrypted `.dud` archive
+/// `dondude db backup` writes, assembled in memory so nothing touches disk
+/// inside the container. The browser stores it; the master key still
+/// decrypts it for `dondude db restore`.
+pub async fn download_backup(
+    State(state): State<AppState>,
+    Operator(_user): Operator,
+) -> Result<Response> {
+    use crate::backup_archive::{BackupInput, read_env_file, read_known_hosts};
+
+    let sql = state.db.dump_sql().await?;
+    let input = BackupInput {
+        database_sql: sql,
+        env_file: read_env_file(),
+        known_hosts: read_known_hosts(),
+    };
+    let bytes = input.archive_bytes(&state.db.key())?;
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let filename = format!("dondude-backup-{timestamp}.dud");
+    let mut response = bytes.into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        "content-type",
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    if let Ok(value) = HeaderValue::from_str(&format!("attachment; filename=\"{filename}\"")) {
+        headers.insert("content-disposition", value);
+    }
+    Ok(response)
 }
 
 /// Save the submitted settings, then check the remote with them.

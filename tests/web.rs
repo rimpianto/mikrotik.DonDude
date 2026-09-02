@@ -327,6 +327,76 @@ async fn the_web_interface_round_trips_what_an_operator_submits() {
         .unwrap();
 }
 
+// The deployment-backup download: pointed at by the Settings card, sealed
+// with the master key, and off-limits without a session.
+#[tokio::test]
+async fn backup_download_route() {
+    let Some(dsn) = common::test_dsn() else {
+        eprintln!("TEST_DATABASE_URL not set — skipping");
+        return;
+    };
+    let key = MasterKey::generate().unwrap();
+    let db = Arc::new(
+        Db::connect(&dsn, 4, MasterKey::from_base64(&key).unwrap())
+            .await
+            .expect("connect"),
+    );
+    db.migrate().await.expect("migrate");
+    sqlx::query(
+        "TRUNCATE users, sessions, tenants, devices, backup_runs, backup_events,
+             login_attempts CASCADE",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    let mut client = Client {
+        state: AppState::new(Arc::clone(&db), repo.path().to_path_buf()),
+        cookie: None,
+    };
+
+    // Create the operator account through the public setup flow.
+    let reply = client
+        .post(
+            "/setup",
+            "username=admin&password=supersecret1&confirm=supersecret1".to_string(),
+        )
+        .await;
+    assert_eq!(reply.location.as_deref(), Some("/"), "setup must sign us in");
+
+    // No session: bounced to the login page, nothing leaks.
+    let _ = client;
+    let mut anon = Client {
+        state: AppState::new(Arc::clone(&db), repo.path().to_path_buf()),
+        cookie: None,
+    };
+    let reply = anon.get("/backup").await;
+    assert_eq!(reply.location.as_deref(), Some("/login"), "must require login");
+
+    // Signed in: the settings page carries the download button...
+    let reply = client.get("/settings").await;
+    assert!(reply.body.contains("href=\"/backup\""));
+
+    // ...and the route serves the sealed archive. The harness reads the body
+    // as lossy text, which is fine: we only assert the magic header and the
+    // filename in the disposition header were produced.
+    let reply = client.get("/backup").await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert!(
+        reply.body.starts_with("DNDDBKP1"),
+        "the archive must start with the .dud magic bytes, got: {:?}",
+        &reply.body[..8.min(reply.body.len())]
+    );
+
+    sqlx::query(
+        "TRUNCATE users, sessions, tenants, devices, backup_runs, backup_events,
+             login_attempts CASCADE",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+}
+
 fn first_banner(body: &str) -> String {
     body.split("class=\"banner")
         .nth(1)

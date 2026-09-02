@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.5] - 2026-09-03
+
+### Added
+- Deployment backup via the web UI: a Settings card with a download button
+  serving the same encrypted `.dud` archive `dondude db backup` writes
+  (database dump + `.env` + `known_hosts`), assembled in memory so nothing
+  touches disk inside the container. Restores unchanged with
+  `dondude db restore <file>`.
+
+### Changed
+- `BackupInput::write_archive` now delegates to a new in-memory
+  `archive_bytes`; the `.env`/`known_hosts` discovery helpers moved into
+  `backup_archive` so the CLI and the web route share one implementation.
+
 ## [0.4.4] - 2026-09-02
 
 ### Fixed

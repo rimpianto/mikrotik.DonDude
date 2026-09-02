@@ -38,7 +38,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+
 use std::path::Path;
 
 use crate::crypto::MasterKey;
@@ -103,8 +103,9 @@ pub struct BackupInput {
 }
 
 impl BackupInput {
-    /// Write the archive to `path`, sealed with `key`.
-    pub fn write_archive(&self, path: &Path, key: &MasterKey) -> Result<()> {
+    /// Assemble the sealed archive in memory. The same bytes `write_archive`
+    /// puts on disk — served by the web UI as a download.
+    pub fn archive_bytes(&self, key: &MasterKey) -> Result<Vec<u8>> {
         let mut files: Vec<(String, Vec<u8>)> = Vec::new();
         files.push((
             "database.sql".to_string(),
@@ -138,13 +139,39 @@ impl BackupInput {
 
         let sealed = seal_stream(&payload, key)?;
 
-        let mut file = std::fs::File::create(path)
+        let mut out = Vec::new();
+        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(&FORMAT.to_be_bytes());
+        out.extend_from_slice(&sealed);
+        Ok(out)
+    }
+
+    /// Write the archive to `path`, sealed with `key`.
+    pub fn write_archive(&self, path: &Path, key: &MasterKey) -> Result<()> {
+        let bytes = self.archive_bytes(key)?;
+        std::fs::write(path, bytes)
             .map_err(|e| Error::config(format!("cannot create {}: {e}", path.display())))?;
-        file.write_all(MAGIC)?;
-        file.write_all(&FORMAT.to_be_bytes())?;
-        file.write_all(&sealed)?;
         Ok(())
     }
+}
+
+/// Locate the `.env` next to the working directory. Shared by the CLI and
+/// the web download route so both archives hold the same files.
+pub fn read_env_file() -> Option<(String, String)> {
+    for candidate in [".env"] {
+        if let Ok(contents) = std::fs::read_to_string(candidate) {
+            return Some((contents, candidate.to_string()));
+        }
+    }
+    None
+}
+
+/// Locate the operator's `known_hosts`, if present.
+pub fn read_known_hosts() -> Option<(String, String)> {
+    let home = std::env::var_os("HOME")?;
+    let path = std::path::Path::new(&home).join(".ssh").join("known_hosts");
+    let contents = std::fs::read_to_string(&path).ok()?;
+    Some((contents, path.display().to_string()))
 }
 
 /// One restored archive, in memory.

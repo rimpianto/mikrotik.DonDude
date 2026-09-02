@@ -1031,8 +1031,8 @@ async fn db_backup(db: &Db, dir: &Path) -> Result<ExitCode> {
 
     // The .env file, wherever it is. Look in the obvious places: next to the
     // working directory, then the directory the binary was started from.
-    let env_file = read_env_file();
-    let known_hosts = read_known_hosts();
+    let env_file = mikrotik_dondude::backup_archive::read_env_file();
+    let known_hosts = mikrotik_dondude::backup_archive::read_known_hosts();
 
     let input = mikrotik_dondude::backup_archive::BackupInput {
         database_sql: sql,
@@ -1105,21 +1105,4 @@ async fn db_restore(db: &Db, file: &Path, yes: bool, write_env: bool) -> Result<
         }
     }
     Ok(ExitCode::SUCCESS)
-}
-
-/// Find the deployment's .env: working directory first, then the usual spots.
-fn read_env_file() -> Option<(String, String)> {
-    for candidate in [".env"] {
-        if let Ok(contents) = std::fs::read_to_string(candidate) {
-            return Some((contents, candidate.to_string()));
-        }
-    }
-    None
-}
-
-fn read_known_hosts() -> Option<(String, String)> {
-    let home = std::env::var_os("HOME")?;
-    let path = std::path::Path::new(&home).join(".ssh").join("known_hosts");
-    let contents = std::fs::read_to_string(&path).ok()?;
-    Some((contents, path.display().to_string()))
 }
