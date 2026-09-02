@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.4] - 2026-09-02
+
+### Fixed
+- Binary-backup empty-state UX: the "none" chip on the device page claimed the
+  toggle lived "in Settings", but no such setting exists — the binary backup
+  is produced by the router itself, not by DonDude. The chip is now an
+  expandable block that shows the exact RouterOS commands to run (the
+  `DailyBinaryBackup` scheduler plus the immediate first save), rendered as a
+  selectable `pre` block for one-click copy.
+
 ## [0.4.3] - 2026-09-02
 
 ### Added

@@ -102,6 +102,12 @@ pre.diff .head { color: var(--muted); }
 .kv dd { margin: 0; }
 .stat { font-size: 26px; font-weight: 700; }
 .empty { color: var(--muted); text-align: center; padding: 28px 0; }
+details.chip-help { display: inline-block; }
+details.chip-help > pre {
+  margin: 8px 0 0; padding: 10px 12px; border-radius: 6px; text-align: left;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  white-space: pre-wrap; user-select: all; cursor: text; max-width: 640px; }
 "#;
 
 /// Which nav item to highlight.
@@ -1159,8 +1165,20 @@ fn binary_backup_chip(bytes: Option<u64>) -> Markup {
             span.badge.ok { "Binary backup: present (" (bytes / 1024) " KB)" }
         },
         None => html! {
-            span.badge.warn {
-                "Binary backup: none — enable AutomatedBinaryBackup.backup in Settings to keep one"
+            details.chip-help {
+                summary.badge.warn { "Binary backup: none — how to enable" }
+                pre {
+                    "No binary backup file was found on the router. DonDude downloads
+the file the router itself creates, so the MikroTik must be told to generate
+it. Run these commands in the router's terminal:
+
+1) Create the scheduler for the daily automated backup:
+/system scheduler add name=DailyBinaryBackup interval=1d start-time=03:00:00 \
+    on-event=\"/system backup save name=AutomatedBinaryBackup dont-encrypt=yes\"
+
+2) Generate the first backup immediately:
+/system backup save name=AutomatedBinaryBackup dont-encrypt=yes"
+                }
             }
         },
     }
@@ -1546,6 +1564,11 @@ mod tests {
         );
         let none = binary_backup_chip(None).into_string();
         assert!(none.contains("none") && none.contains("AutomatedBinaryBackup"));
+        // The empty state must carry the copyable RouterOS instructions, not a
+        // reference to a nonexistent Settings toggle.
+        assert!(none.contains("/system scheduler add name=DailyBinaryBackup"));
+        assert!(none.contains("/system backup save name=AutomatedBinaryBackup"));
+        assert!(!none.contains("in Settings"));
     }
 
     #[test]
