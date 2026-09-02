@@ -1267,16 +1267,24 @@ fn sparkline(samples: &[Sample]) -> Markup {
             "0 0 " (SPARK_W) " " (SPARK_H)
         } role="img" aria-label="CPU load and free memory sparkline"
             style="width:100%;max-width:560px;height:auto;display:block;margin:10px 0" {
+            // Rendered as raw strings with XML self-closing: maud's HTML
+            // mode leaves <polyline> unterminated, which makes the browser
+            // swallow the elements that follow inside the <svg>.
             @if !cpu_points.is_empty() {
-                polyline points=(points_attr(&cpu_points))
-                    fill="none" stroke="#4c8dff" stroke-width="2";
+                (PreEscaped(format!(
+                    "<polyline points=\"{}\" fill=\"none\" stroke=\"#4c8dff\" stroke-width=\"2\"/>",
+                    points_attr(&cpu_points)
+                )))
             }
             @if !memory_points.is_empty() {
-                line x1="0" y1=(band_h) x2=(SPARK_W) y2=(band_h)
-                    stroke="#444c56" stroke-width="1" stroke-dasharray="2 4";
-                polyline points=(points_attr(&memory_points))
-                    fill="none" stroke="#3fb950" stroke-width="1.5"
-                    stroke-dasharray="4 3" opacity="0.8";
+                (PreEscaped(format!(
+                    "<line x1=\"0\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#444c56\" stroke-width=\"1\" stroke-dasharray=\"2 4\"/>",
+                    band_h, SPARK_W, band_h
+                )))
+                (PreEscaped(format!(
+                    "<polyline points=\"{}\" fill=\"none\" stroke=\"#3fb950\" stroke-width=\"1.5\" stroke-dasharray=\"4 3\" opacity=\"0.8\"/>",
+                    points_attr(&memory_points)
+                )))
             }
         }
         div.row {
