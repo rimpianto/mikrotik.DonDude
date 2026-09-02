@@ -721,7 +721,9 @@ impl Db {
                  export_mode = $8, show_sensitive = $9, concurrency = $10,
                  connect_timeout_secs = $11, command_timeout_secs = $12, host_key_policy = $13,
                  schedule_enabled = $14, schedule_hour = $15, schedule_minute = $16,
-                 allow_invalid_certs = $17, updated_at = now()
+                 allow_invalid_certs = $17,
+                 monitor_enabled = $18, monitor_interval_secs = $19,
+                 monitor_retention_days = $20, updated_at = now()
              WHERE id",
         )
         .bind(input.path_template.trim())
@@ -747,6 +749,9 @@ impl Db {
         .bind(input.schedule_hour)
         .bind(input.schedule_minute)
         .bind(input.allow_invalid_certs)
+        .bind(input.monitor_enabled)
+        .bind(input.monitor_interval_secs)
+        .bind(input.monitor_retention_days)
         .execute(&mut *tx)
         .await?;
 
