@@ -1250,10 +1250,18 @@ fn sparkline(samples: &[Sample]) -> Markup {
         .filter_map(|s| s.cpu_load.map(i64::from))
         .collect();
     let memory = memory_free_series(samples);
-    let cpu_points = spark_points(&cpu, 0, 100, SPARK_W, SPARK_H, SPARK_PAD);
+
+    // Two bands, stacked: CPU on the upper half, memory on the lower one, so a
+    // flat or low CPU line can never hide the memory line (or vice versa).
+    let band_h = SPARK_H / 2;
+    let cpu_points = spark_points(&cpu, 0, 100, SPARK_W, band_h, SPARK_PAD);
     let mem_min = memory.iter().copied().min().unwrap_or(0);
     let mem_max = memory.iter().copied().max().unwrap_or(1).max(mem_min + 1);
-    let memory_points = spark_points(&memory, mem_min, mem_max, SPARK_W, SPARK_H, SPARK_PAD);
+    let memory_points = spark_points(&memory, mem_min, mem_max, SPARK_W, band_h, SPARK_PAD)
+        .into_iter()
+        .map(|(x, y)| (x, y + band_h as f64))
+        .collect::<Vec<_>>();
+
     html! {
         svg xmlns="http://www.w3.org/2000/svg" viewBox={
             "0 0 " (SPARK_W) " " (SPARK_H)
@@ -1264,15 +1272,17 @@ fn sparkline(samples: &[Sample]) -> Markup {
                     fill="none" stroke="#4c8dff" stroke-width="2";
             }
             @if !memory_points.is_empty() {
+                line x1="0" y1=(band_h) x2=(SPARK_W) y2=(band_h)
+                    stroke="#444c56" stroke-width="1" stroke-dasharray="2 4";
                 polyline points=(points_attr(&memory_points))
                     fill="none" stroke="#3fb950" stroke-width="1.5"
                     stroke-dasharray="4 3" opacity="0.8";
             }
         }
         div.row {
-            div.hint { span style="color:#4c8dff" { "▬" } " CPU load (%)" }
+            div.hint { span style="color:#4c8dff" { "▬" } " CPU load (%) — upper band" }
             @if !memory_points.is_empty() {
-                div.hint { span style="color:#3fb950" { "▬" } " free memory" }
+                div.hint { span style="color:#3fb950" { "▬" } " free memory — lower band" }
             }
         }
     }
