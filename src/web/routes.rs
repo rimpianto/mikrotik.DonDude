@@ -272,6 +272,9 @@ pub async fn dashboard(State(state): State<AppState>, Operator(user): Operator) 
     let live = state.runs.latest();
     // Quietly skipped when monitoring is off: the dashboard renders a dash.
     let samples = state.db.latest_samples().await.unwrap_or_default();
+    // Devices that have a `.backup` file in the repository working tree, for
+    // the Binary column on the dashboard.
+    let binary_backups = state.binary_backup_devices().await.unwrap_or_default();
 
     Ok(page(views::dashboard(
         &user,
@@ -281,6 +284,7 @@ pub async fn dashboard(State(state): State<AppState>, Operator(user): Operator) 
         settings.remote_url.is_some(),
         &state.repo_path.display().to_string(),
         &samples,
+        &binary_backups,
     )))
 }
 

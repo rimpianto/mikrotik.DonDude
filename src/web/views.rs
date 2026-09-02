@@ -250,6 +250,7 @@ pub fn dashboard(
     remote_configured: bool,
     repo_path: &str,
     samples: &[Sample],
+    binary_backups: &[uuid::Uuid],
 ) -> Markup {
     let enabled = devices.iter().filter(|device| device.enabled).count();
     let failing = devices
@@ -320,7 +321,8 @@ pub fn dashboard(
                     table {
                         thead { tr {
                             th { "Device" } th { "Address" } th { "Tenant" }
-                            th { "Firmware" } th { "CPU" } th { "Last result" } th { "Last seen" }
+                            th { "Firmware" } th { "CPU" } th { "Binary" }
+                            th { "Last result" } th { "Last seen" }
                         } }
                         tbody { @for device in devices {
                             tr {
@@ -331,6 +333,7 @@ pub fn dashboard(
                                 td.mono { (device.addr()) }
                                 td { (device.tenant) }
                                 td { (cpu_badge(samples.iter().find(|s| s.device_id == device.id))) }
+                                td { (binary_badge(binary_backups.contains(&device.id))) }
                                 td.mono { (option(device.firmware.as_deref())) }
                                 td { (outcome_badge(device.last_outcome.as_deref())) }
                                 td.muted { (option_time(device.last_seen_at)) }
@@ -1139,6 +1142,15 @@ fn cpu_badge(latest: Option<&Sample>) -> Markup {
     }
 }
 
+/// Dashboard column badge: does this device have a binary backup on disk?
+fn binary_badge(present: bool) -> Markup {
+    if present {
+        html! { span.badge.ok { "✓" } }
+    } else {
+        html! { span.muted { "—" } }
+    }
+}
+
 /// Binary-backup chip for the device page header. The size is the number of
 /// bytes on disk in the repository working tree.
 fn binary_backup_chip(bytes: Option<u64>) -> Markup {
@@ -1169,7 +1181,7 @@ fn monitoring_section(samples: &[Sample]) -> Markup {
         };
     }
     let memory = memory_free_series(samples);
-    let cpu_label = min_max_label(samples.iter().filter_map(|s| s.cpu_load.map(i64::from)))
+    let cpu_label = percent_label(samples.iter().filter_map(|s| s.cpu_load.map(i64::from)))
         .unwrap_or_else(|| "—".into());
     let memory_label = min_max_label(memory.iter().copied()).unwrap_or_else(|| "—".into());
     html! {
@@ -1182,7 +1194,7 @@ fn monitoring_section(samples: &[Sample]) -> Markup {
             table {
                 thead { tr {
                     th { "Time" } th { "CPU load" } th { "Free memory" }
-                    th { "Free disk" } th { "Uptime" } th { "Voltage" }
+                    th { "Free disk" } th { "Uptime" } th { "Temperature" }
                 } }
                 tbody { @for sample in samples.iter().rev().take(10) {
                     tr {
@@ -1195,7 +1207,7 @@ fn monitoring_section(samples: &[Sample]) -> Markup {
                         td.mono { (bytes_pair(sample.free_memory, sample.total_memory)) }
                         td.mono { (bytes_pair(sample.free_hdd, sample.total_hdd)) }
                         td.muted { (uptime(sample.uptime_secs)) }
-                        td.mono { (volts(sample.voltage)) }
+                        td.mono { (celsius(sample.temperature)) }
                     }
                 } }
             }
@@ -1206,6 +1218,15 @@ fn monitoring_section(samples: &[Sample]) -> Markup {
 /// The samples that have a free-memory reading, oldest first.
 fn memory_free_series(samples: &[Sample]) -> Vec<i64> {
     samples.iter().filter_map(|s| s.free_memory).collect()
+}
+
+/// "min 12% · max 97%" label for a percent series, or `None` when empty.
+fn percent_label(series: impl Iterator<Item = i64>) -> Option<String> {
+    let (min, max) = series.fold(None::<(i64, i64)>, |acc, v| match acc {
+        None => Some((v, v)),
+        Some((lo, hi)) => Some((lo.min(v), hi.max(v))),
+    })?;
+    Some(format!("min {}% · max {}%", min, max))
 }
 
 /// "min 12% · max 97%" label text for a series, or `None` when it is empty.
@@ -1261,9 +1282,15 @@ fn sparkline(samples: &[Sample]) -> Markup {
 /// `[min, max]`; with fewer than two points the series has no line to
 /// draw, so the caller skips it. Pure function — unit-tested.
 fn spark_points(series: &[i64], min: i64, max: i64, w: u32, h: u32, pad: u32) -> Vec<(f64, f64)> {
-    if series.is_empty() || max <= min {
+    if series.is_empty() {
         return Vec::new();
     }
+    // A flat series is still a line — horizontal, in the middle of the band.
+    let (min, max) = if max <= min {
+        (min, min + 1)
+    } else {
+        (min, max)
+    };
     let span = (max - min) as f64;
     let step = if series.len() > 1 {
         (w - 2 * pad) as f64 / (series.len() - 1) as f64
@@ -1313,6 +1340,14 @@ fn human_bytes(bytes: i64) -> String {
         format!("{} {}", bytes, UNITS[0])
     } else {
         format!("{:.1} {}", value, UNITS[unit])
+    }
+}
+
+/// "45 °C", or a dash when the router did not report a temperature.
+fn celsius(temp: Option<f64>) -> Markup {
+    match temp {
+        Some(t) => html! { span.mono { (format!("{:.0}", t)) " °C" } },
+        None => html! { span.muted { "—" } },
     }
 }
 

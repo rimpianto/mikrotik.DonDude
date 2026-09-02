@@ -49,6 +49,25 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Device ids that have a `.backup` file in the repository working tree,
+    /// for the Binary column on the dashboard. Best-effort: a missing repo or
+    /// an unreadable tree yields an empty list, never an error.
+    pub async fn binary_backup_devices(
+        &self,
+    ) -> std::result::Result<Vec<uuid::Uuid>, crate::error::Error> {
+        let devices = self.db.devices().await?;
+        let template = self.db.settings().await?.path_template;
+        let mut present = Vec::new();
+        for device in &devices {
+            let rsc = crate::db::backup_path_for(device, &template);
+            let sibling = crate::backup::binary_sibling(&rsc);
+            if self.repo_path.join(&sibling).exists() {
+                present.push(device.id);
+            }
+        }
+        Ok(present)
+    }
+
     pub fn new(db: Arc<Db>, repo_path: PathBuf) -> Self {
         Self {
             db,
