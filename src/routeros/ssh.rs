@@ -249,12 +249,27 @@ impl SshSession {
         })
     }
 
-    /// Download a remote file over the same session (SCP), reading it to end.
+    /// Download a remote file over the same session, reading it to end.
     ///
-    /// Missing files surface as an `ssh2` error from `scp_recv`; callers that
-    /// treat "no such file" as an expected case match on the error there.
+    /// RouterOS 7.16+ serves files over SFTP; older releases only accept the
+    /// legacy SCP protocol, which needs the `ftp` user policy either way (the
+    /// device file system *is* the FTP service). Try SFTP first, then SCP.
+    ///
+    /// Missing files surface as an `ssh2` error from whichever transport was
+    /// reached; callers that treat "no such file" as an expected case match on
+    /// the error there.
     pub fn download_file(&self, remote_path: &str) -> Result<Vec<u8>, DeviceError> {
-        debug!(host = %self.target.host, remote_path, "scp download");
+        debug!(host = %self.target.host, remote_path, "file download");
+        let sftp = self.session.sftp();
+        if let Ok(sftp) = &sftp {
+            if let Ok(mut file) = sftp.open(std::path::Path::new(remote_path)) {
+                let mut bytes = Vec::new();
+                if file.read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
+                    return Ok(bytes);
+                }
+            }
+        }
+        // Fallback: legacy SCP protocol.
         let (mut channel, _stats) = self.session.scp_recv(std::path::Path::new(remote_path))?;
         let mut bytes = Vec::new();
         channel.read_to_end(&mut bytes)?;
