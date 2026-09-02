@@ -1322,12 +1322,13 @@ fn points_attr(points: &[(f64, f64)]) -> String {
 fn bytes_pair(free: Option<i64>, total: Option<i64>) -> Markup {
     match (free, total) {
         (Some(free), Some(total)) if total > 0 => {
-            // Free and used, with the used share — the number an operator
-            // actually watches. "49.7 MiB free · 81% used".
-            let used_pct = ((total - free) * 100) / total;
+            // Used over total, with the share — the number an operator
+            // actually watches. "206.3 MiB / 256.0 MiB · 80%".
+            let used = total - free;
+            let used_pct = (used * 100) / total;
             html! {
-                (human_bytes(free)) " free · "
-                span.badge.(pct_class(used_pct)) { (used_pct) "% used" }
+                (human_bytes(used)) " / " (human_bytes(total)) " · "
+                span.badge.(pct_class(used_pct)) { (used_pct) "%" }
             }
         }
         (Some(free), Some(_)) => html! { (human_bytes(free)) },
