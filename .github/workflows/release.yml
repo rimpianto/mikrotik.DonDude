@@ -7,6 +7,9 @@
 # Runners (labels are the GitHub defaults for self-hosted runners):
 #   - WSL Claude_IDF  (Linux ARM64) -> binaries aarch64 + image arm64
 #   - lxc-dondude     (Linux X64)    -> binaries x86_64 + image amd64
+#
+# Note: the container repository name must be lowercase; the repo name
+# ("mikrotik.DonDude") is not, so every reference lowercases it first.
 name: release
 
 on:
@@ -17,10 +20,6 @@ on:
 permissions:
   contents: write
   packages: write
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   binaries:
@@ -58,20 +57,11 @@ jobs:
             dondude-*.tar.gz
             dondude-*.sha256
 
-  image:
-    name: container image (${{ matrix.platform }})
-    runs-on: ${{ matrix.runs-on }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            runs-on: [self-hosted, Linux, X64]
-          - platform: linux/arm64
-            runs-on: [self-hosted, Linux, ARM64]
+  image-amd64:
+    name: container image (linux/amd64)
+    runs-on: [self-hosted, Linux, X64]
     outputs:
-      digest-amd64: ${{ steps.push.outputs.digest }}
-      digest-arm64: ${{ steps.push.outputs.digest }}
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -80,25 +70,50 @@ jobs:
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Push each arch under a temporary tag; the publish job merges the
-      # digests into the final multi-arch tags.
       - name: Build and push by digest
         id: push
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64
           push: true
           provenance: false
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,push=true
+          outputs: type=image,name=ghcr.io/rimpianto/mikrotik.dondude,push-by-digest=true,push=true
+
+  image-arm64:
+    name: container image (linux/arm64)
+    runs-on: [self-hosted, Linux, ARM64]
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          outputs: type=image,name=ghcr.io/rimpianto/mikrotik.dondude,push-by-digest=true,push=true
 
   publish:
     name: publish release
-    needs: [binaries, image]
+    needs: [binaries, image-amd64, image-arm64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,15 +126,15 @@ jobs:
 
       - name: Merge multi-arch image and tag
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
-          image="ghcr.io/${{ env.IMAGE_NAME }}"
+          image="ghcr.io/rimpianto/mikrotik.dondude"
           ver="${GITHUB_REF_NAME#v}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
           docker buildx imagetools create \
             -t "$image:$ver" \
             -t "$image:${ver%.*}" \
             -t "$image:latest" \
-            "$image@${{ needs.image.outputs.digest-amd64 }}" \
-            "$image@${{ needs.image.outputs.digest-arm64 }}"
+            "$image@${{ needs.image-amd64.outputs.digest }}" \
+            "$image@${{ needs.image-arm64.outputs.digest }}"
 
       # The release notes are the matching section of CHANGELOG.md, with
       # GitHub's commit list appended automatically.
