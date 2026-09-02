@@ -417,6 +417,51 @@ impl BackupRepo {
         Ok(Stored::Committed(commit))
     }
 
+    /// Write raw bytes (e.g. a binary `.backup` file) and commit them if they
+    /// changed.
+    ///
+    /// Mirrors [`store`](Self::store) but for non-UTF-8 payloads: the on-disk
+    /// file is compared byte-for-byte, and a change or a dirty path commits.
+    pub fn store_binary(
+        &self,
+        relative_path: &Path,
+        bytes: &[u8],
+        meta: &CommitMeta,
+    ) -> Result<Stored> {
+        let absolute = self.resolve(relative_path)?;
+        if let Some(parent) = absolute.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let existing = std::fs::read(&absolute).ok();
+        let bytes_changed = existing.as_deref() != Some(bytes);
+        if bytes_changed {
+            std::fs::write(&absolute, bytes)?;
+        }
+
+        // Even with identical bytes the path can be dirty — an earlier run may
+        // have been killed between the write and the commit.
+        let status = self
+            .repo
+            .status_file(relative_path)
+            .unwrap_or_else(|_| git2::Status::empty());
+        if !bytes_changed && status.is_empty() {
+            debug!(path = %relative_path.display(), "unchanged (binary)");
+            return Ok(Stored::Unchanged);
+        }
+
+        let initial = !self.is_tracked(relative_path);
+        let commit = self.commit_path(relative_path, meta, initial)?;
+        info!(
+            device = %meta.device,
+            path = %relative_path.display(),
+            commit = %commit.id,
+            bytes = bytes.len(),
+            "committed binary backup"
+        );
+        Ok(Stored::Committed(commit))
+    }
+
     /// Would [`store`](Self::store) change anything? Used by `--dry-run`, which
     /// must not touch the working tree.
     pub fn would_change(&self, relative_path: &Path, contents: &str) -> Result<bool> {
@@ -774,6 +819,33 @@ mod tests {
             committer: Committer::default(),
             remote: None,
         }
+    }
+
+    #[test]
+    fn binary_store_commits_on_change_and_stays_quiet_when_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = BackupRepo::open_or_init(&backup_config(dir.path())).unwrap();
+        let path = Path::new("acme/rtr1.backup");
+
+        let payload: &[u8] = &[0x00, 0x01, 0xFF, 0x10, 0xAB];
+        let first = repo.store_binary(path, payload, &meta("rtr1")).unwrap();
+        let commit = first.commit().expect("initial binary store must commit");
+        assert!(commit.initial);
+
+        // Identical bytes: no second commit.
+        let second = repo.store_binary(path, payload, &meta("rtr1")).unwrap();
+        assert!(matches!(second, Stored::Unchanged));
+
+        // Changed bytes: one more commit, and the file on disk matches.
+        let changed: &[u8] = &[0x00, 0x02, 0xFF, 0x10, 0xAB];
+        let third = repo.store_binary(path, changed, &meta("rtr1")).unwrap();
+        assert!(third.commit().is_some());
+        assert_eq!(
+            std::fs::read(dir.path().join(path)).unwrap(),
+            changed,
+            "binary payload must be written byte-for-byte"
+        );
+        assert!(!repo.is_dirty().unwrap());
     }
 
     #[test]

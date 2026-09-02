@@ -139,8 +139,17 @@ pub struct ExportedConfig {
 /// `device_name` is stamped into the rewritten banner so an `.rsc` file is
 /// self-describing once it is out of the repo.
 pub fn normalize(raw: &str, command: &str, device_name: &str, options: &Export) -> ExportedConfig {
-    let info = RouterInfo::from_export_banner(raw);
-    let contents = render(raw, command, device_name, &info, options);
+    let (prefix, export_part) = split_at_export_banner(raw);
+    let info = RouterInfo::from_export_banner(&export_part);
+    let contents = render(
+        raw,
+        &prefix,
+        &export_part,
+        command,
+        device_name,
+        &info,
+        options,
+    );
     ExportedConfig {
         contents,
         info,
@@ -149,19 +158,29 @@ pub fn normalize(raw: &str, command: &str, device_name: &str, options: &Export) 
 }
 
 /// Re-render with a fuller [`RouterInfo`] than the banner alone could provide.
+///
+/// `prefix` and `export_part` come from [`split_at_export_banner`]; both are
+/// derived from `raw`, which is what the verbatim mode falls back to.
 pub fn render(
     raw: &str,
+    prefix: &str,
+    export_part: &str,
     command: &str,
     device_name: &str,
     info: &RouterInfo,
     options: &Export,
 ) -> String {
-    let body = strip_banner(raw);
     if !options.normalize_header {
         // Verbatim mode: line endings only. Accepts a diff on every run in
         // exchange for a byte-faithful copy of what the device sent.
         return ensure_trailing_newline(&normalize_newlines(raw));
     }
+
+    // The `/user` print output ahead of the export banner is kept verbatim:
+    // it is live state, not config, and there is nothing volatile in it to
+    // normalize. Empty captures (no prefix) add nothing.
+    let prefix = ensure_trailing_newline(&normalize_newlines(prefix));
+    let body = strip_banner(export_part);
 
     let mut out = String::with_capacity(body.len() + 256);
     out.push_str("# RouterOS configuration export captured by DonDude\n");
@@ -176,8 +195,45 @@ pub fn render(
     out.push_str("#\n");
     // Deliberately absent: the capture timestamp. It changes every run and
     // would defeat change detection; the commit records it instead.
+    out.push_str(&prefix);
     out.push_str(&body);
     ensure_trailing_newline(&out)
+}
+
+/// Split combined command output at the RouterOS export banner.
+///
+/// The executed command is `/user print detail; /user ssh-keys print; /export
+/// …`, so the raw output starts with the user print output and the export
+/// banner appears mid-stream. The banner is the first `#`-comment line reading
+/// `# <date> by RouterOS <ver>`; that line and everything after it belong to
+/// the export, everything before it to the prints.
+///
+/// Captures without a recognized banner (older RouterOS, a manual run) keep
+/// everything in `export_part`, matching the pre-combined-command behaviour.
+///
+/// Returns owned strings because the split point is computed over newline-
+/// normalized text, which is a fresh allocation.
+pub fn split_at_export_banner(raw: &str) -> (String, String) {
+    let normalized = normalize_newlines(raw);
+    let mut offset = 0usize;
+    for (line, end) in normalized.split_inclusive('\n').map(|l| {
+        let end = l.len();
+        (l.trim_end_matches('\n'), end)
+    }) {
+        if line.trim_start().starts_with('#')
+            && line
+                .trim_start_matches('#')
+                .trim()
+                .contains(" by RouterOS ")
+        {
+            return (
+                normalized[..offset].to_string(),
+                normalized[offset..].to_string(),
+            );
+        }
+        offset += end;
+    }
+    (String::new(), normalized)
 }
 
 /// The leading run of comment/blank lines that RouterOS prepends to an export.
@@ -365,6 +421,62 @@ set telnet disabled=yes
             out.contents
                 .contains("# 2024-01-15 10:22:31 by RouterOS 7.13.2")
         );
+    }
+
+    const V7_PRINTS_THEN_EXPORT: &str = "\
+Flags: A - disabled, H - hidden
+ 0 A name=\"admin\" group=full password-hash=\"...\" \
+   password-hash-nthash=\"...\"
+
+ 0 user=\"admin\" key-owner=\"ssh-rsa AAA...\"
+# 2024-01-15 10:22:31 by RouterOS 7.13.2
+# software id = ABCD-EFGH
+#
+# model = RB5009UG+S+
+# serial number = HGT08XXXXX
+
+/interface bridge
+add admin-mac=48:A9:8A:00:00:01 auto-mac=no comment=defconf name=bridge
+";
+
+    #[test]
+    fn split_separates_user_prints_from_the_export() {
+        let (prefix, export_part) = split_at_export_banner(V7_PRINTS_THEN_EXPORT);
+        assert!(prefix.contains("name=\"admin\""));
+        assert!(prefix.contains("key-owner=\"ssh-rsa"));
+        assert!(!prefix.contains("by RouterOS"));
+        assert!(export_part.starts_with("# 2024-01-15 10:22:31 by RouterOS 7.13.2"));
+        assert!(export_part.contains("/interface bridge"));
+    }
+
+    #[test]
+    fn output_without_a_banner_goes_whole_into_the_export_part() {
+        let raw = "/ip address\nadd address=10.0.0.1/24\n";
+        let (prefix, export_part) = split_at_export_banner(raw);
+        assert_eq!(prefix, "");
+        assert_eq!(export_part, raw);
+    }
+
+    #[test]
+    fn user_prints_are_kept_verbatim_between_header_and_config() {
+        let out = normalize(
+            V7_PRINTS_THEN_EXPORT,
+            "/user print detail; /user ssh-keys print; /export terse",
+            "rtr1",
+            &options(),
+        );
+        // Header first.
+        assert!(out.contents.starts_with("# RouterOS configuration export"));
+        // Then the user/ssh-keys state, verbatim (right after the bare "#"
+        // line that closes the header block).
+        let header_end = out.contents.find("#\n").expect("end of header block");
+        let after_header = &out.contents[header_end + 2..];
+        assert!(after_header.starts_with("Flags: A - disabled"));
+        assert!(after_header.contains("name=\"admin\""));
+        assert!(after_header.contains("key-owner=\"ssh-rsa"));
+        // Then the stripped config body.
+        assert!(out.contents.contains("/interface bridge"));
+        assert!(!out.contents.contains("by RouterOS 7.13.2\n"));
     }
 
     #[test]

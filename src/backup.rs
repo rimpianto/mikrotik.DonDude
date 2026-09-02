@@ -305,7 +305,7 @@ where
             }
         };
 
-        let outcome = fold_capture(&repo, &path, &capture, options)?;
+        let outcome = fold_capture(&repo, &path, &capture, options, progress)?;
         if matches!(outcome, Outcome::Committed(_)) {
             commits += 1;
         }
@@ -373,12 +373,21 @@ async fn capture_one<'a>(
 }
 
 /// Write and commit one capture, or report what a dry run would have done.
-fn fold_capture(
+///
+/// When the capture carried a binary backup and this is not a dry run, the
+/// `.backup` file is stored too, at the `.rsc` path with its extension swapped.
+/// A failure storing the binary never costs the run — the text capture is
+/// already safe, so the error is logged and the fleet walk continues.
+fn fold_capture<P>(
     repo: &BackupRepo,
     path: &std::path::Path,
     capture: &Capture,
     options: &RunOptions,
-) -> Result<Outcome> {
+    progress: &P,
+) -> Result<Outcome>
+where
+    P: ProgressSink + ?Sized,
+{
     if options.dry_run {
         return Ok(if repo.would_change(path, &capture.config.contents)? {
             Outcome::WouldChange
@@ -386,12 +395,39 @@ fn fold_capture(
             Outcome::Unchanged
         });
     }
-    Ok(
-        match repo.store(path, &capture.config.contents, &commit_meta(capture))? {
-            Stored::Unchanged => Outcome::Unchanged,
-            Stored::Committed(commit) => Outcome::Committed(commit),
-        },
-    )
+    let outcome = match repo.store(path, &capture.config.contents, &commit_meta(capture))? {
+        Stored::Unchanged => Outcome::Unchanged,
+        Stored::Committed(commit) => Outcome::Committed(commit),
+    };
+
+    if let Some(bytes) = &capture.binary_backup {
+        let binary_path = binary_sibling(path);
+        match repo.store_binary(&binary_path, bytes, &commit_meta(capture)) {
+            Ok(_) => progress.info(&format!("stored binary backup {}", binary_path.display())),
+            Err(error) => error!(
+                device = %capture.device,
+                path = %binary_path.display(),
+                %error,
+                "failed to store the binary backup; continuing"
+            ),
+        }
+    }
+
+    Ok(outcome)
+}
+
+/// The `.backup` path for a `.rsc` path: same components, extension replaced.
+fn binary_sibling(path: &std::path::Path) -> std::path::PathBuf {
+    if path.extension().is_some() {
+        path.with_extension("backup")
+    } else {
+        path.with_file_name(format!(
+            "{}.backup",
+            path.file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_default()
+        ))
+    }
 }
 
 fn push_if_needed(

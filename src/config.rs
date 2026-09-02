@@ -278,15 +278,25 @@ impl Default for Export {
 
 impl Export {
     /// The RouterOS command line for this export.
+    ///
+    /// Two `print` commands run ahead of the export so the captured output
+    /// also records the user accounts and their SSH keys — neither appears in
+    /// a plain `/export`, but both would have to be rebuilt after a device
+    /// loss. RouterOS runs the three commands in one SSH exec, in order.
     pub fn command_line(&self) -> String {
-        let mut parts = vec!["/export".to_string()];
+        let mut export = vec!["/export".to_string()];
         if let Some(arg) = self.mode.as_arg() {
-            parts.push(arg.to_string());
+            export.push(arg.to_string());
         }
         if self.show_sensitive {
-            parts.push("show-sensitive".to_string());
+            export.push("show-sensitive".to_string());
         }
-        parts.join(" ")
+        [
+            "/user print detail".to_string(),
+            "/user ssh-keys print".to_string(),
+            export.join(" "),
+        ]
+        .join("; ")
     }
 }
 
@@ -619,14 +629,17 @@ mod tests {
 
     #[test]
     fn export_command_reflects_mode_and_sensitivity() {
-        assert_eq!(Export::default().command_line(), "/export terse");
+        assert_eq!(
+            Export::default().command_line(),
+            "/user print detail; /user ssh-keys print; /export terse"
+        );
         assert_eq!(
             Export {
                 mode: ExportMode::Compact,
                 ..Export::default()
             }
             .command_line(),
-            "/export"
+            "/user print detail; /user ssh-keys print; /export"
         );
         assert_eq!(
             Export {
@@ -635,7 +648,7 @@ mod tests {
                 ..Export::default()
             }
             .command_line(),
-            "/export verbose show-sensitive"
+            "/user print detail; /user ssh-keys print; /export verbose show-sensitive"
         );
     }
 

@@ -249,6 +249,18 @@ impl SshSession {
         })
     }
 
+    /// Download a remote file over the same session (SCP), reading it to end.
+    ///
+    /// Missing files surface as an `ssh2` error from `scp_recv`; callers that
+    /// treat "no such file" as an expected case match on the error there.
+    pub fn download_file(&self, remote_path: &str) -> Result<Vec<u8>, DeviceError> {
+        debug!(host = %self.target.host, remote_path, "scp download");
+        let (mut channel, _stats) = self.session.scp_recv(std::path::Path::new(remote_path))?;
+        let mut bytes = Vec::new();
+        channel.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
     /// Run a command, failing if it exits non-zero or produces nothing.
     pub fn exec_checked(&self, command: &str) -> Result<String, DeviceError> {
         let output = self.exec(command)?;

@@ -242,7 +242,6 @@ async fn scheduler_tick(state: &AppState) -> Result<()> {
     Ok(())
 }
 
-
 /// Background device-state monitoring.
 ///
 /// Same shape as the scheduler: wake, read settings, decide. Polling only
@@ -267,7 +266,11 @@ pub fn spawn_monitor(state: AppState) {
             if chrono::Utc::now().date_naive() != pruned {
                 pruned = chrono::Utc::now().date_naive();
                 if let Ok(settings) = state.db.settings().await {
-                    match state.db.prune_samples(settings.monitor_retention_days).await {
+                    match state
+                        .db
+                        .prune_samples(settings.monitor_retention_days)
+                        .await
+                    {
                         Ok(0) => {}
                         Ok(n) => tracing::info!(n, "pruned old monitor samples"),
                         Err(error) => {
@@ -290,10 +293,7 @@ async fn monitor_tick(state: AppState) -> Result<u32> {
     }
     let interval = settings.monitor_interval_secs.max(10);
 
-    let config = state
-        .db
-        .runtime_config(state.repo_path.clone())
-        .await?;
+    let config = state.db.runtime_config(state.repo_path.clone()).await?;
     let report = crate::monitor::poll_fleet(&state.db, &config).await;
     for failure in &report.failures {
         tracing::debug!(device = %failure.device, %failure.error, "monitor poll failed");

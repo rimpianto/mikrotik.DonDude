@@ -986,7 +986,6 @@ async fn db_command(action: DbCommand) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-
 /// One-shot monitoring sweep, for cron or a first look at the fleet.
 async fn monitor_poll() -> Result<ExitCode> {
     let db = connect().await?;
@@ -1018,7 +1017,6 @@ async fn monitor_poll() -> Result<ExitCode> {
     println!("{}", report.describe());
     Ok(ExitCode::SUCCESS)
 }
-
 
 /// Write an encrypted, self-contained deployment backup.
 ///
@@ -1068,9 +1066,11 @@ async fn db_restore(db: &Db, file: &Path, yes: bool, write_env: bool) -> Result<
     let key = db.key().clone();
     let archive = mikrotik_dondude::backup_archive::Archive::read(file, &key)?;
 
-    println!("Archive created {} by DonDude {}",
+    println!(
+        "Archive created {} by DonDude {}",
         archive.manifest.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
-        archive.manifest.version);
+        archive.manifest.version
+    );
     println!("Files: {}", archive.manifest.files.join(", "));
 
     let Some(sql) = archive.file("database.sql") else {
@@ -1098,8 +1098,10 @@ async fn db_restore(db: &Db, file: &Path, yes: bool, write_env: bool) -> Result<
         if let Some(env) = archive.file(".env") {
             let target = PathBuf::from(".env.restored");
             std::fs::write(&target, env)?;
-            println!(".env written to {} — review and replace your .env.",
-                target.display());
+            println!(
+                ".env written to {} — review and replace your .env.",
+                target.display()
+            );
         }
     }
     Ok(ExitCode::SUCCESS)

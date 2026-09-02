@@ -1339,7 +1339,6 @@ fn duplicate_name(error: sqlx::Error, name: &str) -> Error {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Monitoring
 // ---------------------------------------------------------------------------
@@ -1424,7 +1423,6 @@ impl Db {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Backup archive: dump and restore
 // ---------------------------------------------------------------------------
@@ -1443,7 +1441,11 @@ impl Db {
 
         let mut out = String::new();
         out.push_str("-- DonDude logical dump\n");
-        out.push_str(&format!("-- written by {} at {}\n\n", crate::VERSION, chrono::Utc::now().to_rfc3339()));
+        out.push_str(&format!(
+            "-- written by {} at {}\n\n",
+            crate::VERSION,
+            chrono::Utc::now().to_rfc3339()
+        ));
         // No BEGIN/COMMIT here: restore_sql wraps the replay in its own
         // transaction, and a nested BEGIN through raw_sql would warn.
 
@@ -1463,9 +1465,9 @@ impl Db {
         for table in tables {
             let ident = crate::backup_archive::quote_ident(table);
             // Table names come from the const TABLES list, not user input.
-            let rows = sqlx::raw_sql(sqlx::AssertSqlSafe(
-                format!("SELECT to_jsonb(t) AS row FROM {ident} t"),
-            ))
+            let rows = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+                "SELECT to_jsonb(t) AS row FROM {ident} t"
+            )))
             .fetch_all(&self.pool)
             .await?;
             let mut json_rows: Vec<String> = Vec::with_capacity(rows.len());
@@ -1475,10 +1477,7 @@ impl Db {
                     .map_err(|e| Error::config(format!("dump: {e}")))?;
                 json_rows.push(text);
             }
-            out.push_str(&format!(
-                "\n-- {} rows in {table}\n",
-                json_rows.len()
-            ));
+            out.push_str(&format!("\n-- {} rows in {table}\n", json_rows.len()));
             if !json_rows.is_empty() {
                 out.push_str(&format!(
                     "INSERT INTO {ident} SELECT * FROM jsonb_populate_recordset(null::{table}, '[{}] '::jsonb);\n",

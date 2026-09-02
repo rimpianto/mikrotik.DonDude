@@ -106,7 +106,10 @@ impl BackupInput {
     /// Write the archive to `path`, sealed with `key`.
     pub fn write_archive(&self, path: &Path, key: &MasterKey) -> Result<()> {
         let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-        files.push(("database.sql".to_string(), self.database_sql.clone().into_bytes()));
+        files.push((
+            "database.sql".to_string(),
+            self.database_sql.clone().into_bytes(),
+        ));
 
         if let Some((contents, _)) = &self.env_file {
             files.push((".env".to_string(), contents.clone().into_bytes()));
@@ -125,8 +128,8 @@ impl BackupInput {
             serde_json::to_vec(&manifest).map_err(|e| Error::config(format!("manifest: {e}")))?;
 
         let mut payload: Vec<u8> = Vec::new();
-        let manifest_len = u32::try_from(manifest.len())
-            .map_err(|_| Error::config("manifest too large"))?;
+        let manifest_len =
+            u32::try_from(manifest.len()).map_err(|_| Error::config("manifest too large"))?;
         payload.extend_from_slice(&manifest_len.to_be_bytes());
         payload.extend_from_slice(&manifest);
         for (name, data) in files {
@@ -220,12 +223,10 @@ fn open_stream(sealed: &[u8], key: &MasterKey) -> Result<Vec<u8>> {
 // ---------------------------------------------------------------------------
 
 fn write_entry(out: &mut Vec<u8>, name: &[u8], data: &[u8]) -> Result<()> {
-    let name_len =
-        u32::try_from(name.len()).map_err(|_| Error::config("entry name too long"))?;
+    let name_len = u32::try_from(name.len()).map_err(|_| Error::config("entry name too long"))?;
     out.extend_from_slice(&name_len.to_be_bytes());
     out.extend_from_slice(name);
-    let data_len =
-        u64::try_from(data.len()).map_err(|_| Error::config("entry too large"))?;
+    let data_len = u64::try_from(data.len()).map_err(|_| Error::config("entry too large"))?;
     out.extend_from_slice(&data_len.to_be_bytes());
     out.extend_from_slice(data);
     Ok(())
@@ -317,7 +318,6 @@ pub fn split_statements(sql: &str) -> Vec<String> {
     statements
 }
 
-
 #[cfg(test)]
 mod archive_tests {
     use super::*;
@@ -343,18 +343,21 @@ mod archive_tests {
         assert_eq!(archive.manifest.format, 1);
         assert!(archive.manifest.files.contains(&"database.sql".to_string()));
         assert!(archive.manifest.files.contains(&".env".to_string()));
-        assert_eq!(archive.file("database.sql").unwrap(), b"SELECT 1; -- with 'quotes' and; semicolons");
+        assert_eq!(
+            archive.file("database.sql").unwrap(),
+            b"SELECT 1; -- with 'quotes' and; semicolons"
+        );
         assert_eq!(archive.file(".env").unwrap(), b"DONDUDE_MASTER_KEY=abc\n");
-        assert_eq!(archive.file("known_hosts").unwrap(), b"host ssh-ed25519 AAAA\n");
+        assert_eq!(
+            archive.file("known_hosts").unwrap(),
+            b"host ssh-ed25519 AAAA\n"
+        );
     }
 
     #[test]
     fn wrong_key_cannot_open() {
         let key = test_key();
-        let other = MasterKey::from_base64(
-            "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=",
-        )
-        .unwrap();
+        let other = MasterKey::from_base64("QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=").unwrap();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.dud");
 
@@ -367,10 +370,7 @@ mod archive_tests {
 
         let error = Archive::read(&path, &other).unwrap_err();
         let text = error.to_string();
-        assert!(
-            text.contains("MASTER_KEY"),
-            "unexpected error text: {text}"
-        );
+        assert!(text.contains("MASTER_KEY"), "unexpected error text: {text}");
     }
 
     #[test]

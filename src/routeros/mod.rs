@@ -39,6 +39,9 @@ pub enum Transport {
     Ssh,
 }
 
+/// Name of the binary backup file the fleet scheduler creates daily.
+const BINARY_BACKUP_FILE: &str = "AutomatedBinaryBackup.backup";
+
 /// One successful capture from one device.
 #[derive(Debug, Clone)]
 pub struct Capture {
@@ -48,6 +51,10 @@ pub struct Capture {
     pub transport: Transport,
     pub info: RouterInfo,
     pub config: ExportedConfig,
+    /// Bytes of the router's `AutomatedBinaryBackup.backup`, when it could be
+    /// downloaded. `None` means the file was absent or unreadable — never a
+    /// capture failure.
+    pub binary_backup: Option<Vec<u8>>,
     pub captured_at: DateTime<Utc>,
 }
 
@@ -73,6 +80,7 @@ pub async fn capture(
     let name = device.name.clone();
     let host = device.host.clone();
     let tenant = device.tenant.clone();
+    let error_host = device.host.clone();
 
     // Outer guard for the whole conversation. `libssh2`'s own timeout bounds
     // each read; this bounds the sum of them, including DNS and TCP setup.
@@ -85,10 +93,38 @@ pub async fn capture(
         let info = collect_info(&session);
         let raw = session.exec_checked(&blocking_command)?;
 
+        // The command output starts with the `/user` prints; the export banner
+        // sits mid-stream. Split, then parse the banner from the export part.
+        let (prefix, export_part) = export::split_at_export_banner(&raw);
+
         let mut info = info;
         // Banner values only fill gaps the `/system` prints left behind.
-        info.merge_from(RouterInfo::from_export_banner(&raw));
-        let contents = export::render(&raw, &blocking_command, &blocking_name, &info, &options);
+        info.merge_from(RouterInfo::from_export_banner(&export_part));
+        let contents = export::render(
+            &raw,
+            &prefix,
+            &export_part,
+            &blocking_command,
+            &blocking_name,
+            &info,
+            &options,
+        );
+
+        // The binary backup is best-effort: a missing file or a device without
+        // the scheduler entry costs the `.rsc` capture nothing.
+        let binary_backup = match session.download_file(BINARY_BACKUP_FILE) {
+            Ok(bytes) => Some(bytes),
+            Err(error) => {
+                warn!(
+                    host = %error_host,
+                    %error,
+                    "Binary backup not found. To enable it, run this command on the router: \
+                     /system scheduler add name=DailyBinaryBackup interval=1d start-time=03:00:00 \
+                     on-event='/system backup save name=AutomatedBinaryBackup dont-encrypt=yes'"
+                );
+                None
+            }
+        };
 
         Ok::<_, DeviceError>((
             info.clone(),
@@ -97,10 +133,11 @@ pub async fn capture(
                 info,
                 command: blocking_command,
             },
+            binary_backup,
         ))
     });
 
-    let (info, config) = with_timeout(work, budget).await?;
+    let (info, config, binary_backup) = with_timeout(work, budget).await?;
 
     debug!(
         device = %name,
@@ -116,6 +153,7 @@ pub async fn capture(
         transport: Transport::Ssh,
         info,
         config,
+        binary_backup,
         captured_at: Utc::now(),
     })
 }

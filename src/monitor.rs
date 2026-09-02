@@ -24,7 +24,6 @@
 
 use std::sync::Arc;
 
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
@@ -160,17 +159,19 @@ async fn sample_device_inner(
 
     let budget = general.connect_timeout() + general.command_timeout() * 3;
     let work = tokio::task::spawn_blocking(move || {
-        let session = crate::routeros::SshSession::connect(target)
-            .map_err(|source| crate::error::Error::Device {
+        let session = crate::routeros::SshSession::connect(target).map_err(|source| {
+            crate::error::Error::Device {
                 name: device_name.clone(),
                 source,
-            })?;
-        let resource = session
-            .exec_checked(CMD_RESOURCE)
-            .map_err(|source| crate::error::Error::Device {
-                name: device_name.clone(),
-                source,
-            })?;
+            }
+        })?;
+        let resource =
+            session
+                .exec_checked(CMD_RESOURCE)
+                .map_err(|source| crate::error::Error::Device {
+                    name: device_name.clone(),
+                    source,
+                })?;
         // Health is optional hardware; a refusal is not a failure.
         let health = match session.exec(CMD_HEALTH) {
             Ok(output) if output.status == 0 => Some(output.stdout),
@@ -183,7 +184,7 @@ async fn sample_device_inner(
         Ok(Err(_)) => {
             return Err(crate::error::Error::config(
                 "the sampling worker did not finish cleanly",
-            ))
+            ));
         }
         Err(_) => return Err(crate::error::Error::config("sampling timed out")),
     };
@@ -254,7 +255,11 @@ fn parse_print(raw: &str) -> BTreeMap<String, String> {
 /// Parse "1575MiB" / "1024KiB" / "1GiB" into bytes.
 fn parse_bytes(value: &str) -> Option<i64> {
     let value = value.trim();
-    let (num, unit) = value.split_at(value.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(value.len()));
+    let (num, unit) = value.split_at(
+        value
+            .find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(value.len()),
+    );
     let num: f64 = num.trim().parse().ok()?;
     let mult = match unit.trim() {
         "" => 1.0,
@@ -290,11 +295,7 @@ pub fn parse_uptime(value: &str) -> Option<i64> {
             any = true;
         }
     }
-    if any {
-        Some(total)
-    } else {
-        None
-    }
+    if any { Some(total) } else { None }
 }
 
 use std::collections::BTreeMap;
@@ -331,10 +332,7 @@ mod tests {
         assert_eq!(s.total_memory, Some(1024 * 1024 * 1024));
         assert_eq!(s.free_hdd, Some(9504 * 1024));
         assert_eq!(s.total_hdd, Some(16384 * 1024));
-        assert_eq!(
-            s.uptime_secs,
-            Some((7 + 2) * 86400 + 3 * 3600 + 4 * 60 + 5)
-        );
+        assert_eq!(s.uptime_secs, Some((7 + 2) * 86400 + 3 * 3600 + 4 * 60 + 5));
     }
 
     #[test]
