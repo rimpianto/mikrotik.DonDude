@@ -1461,7 +1461,19 @@ mod tests {
     #[test]
     fn spark_points_degenerate_inputs_are_empty() {
         assert!(spark_points(&[], 0, 100, 100, 50, 0).is_empty());
-        assert!(spark_points(&[1, 2], 5, 5, 100, 50, 0).is_empty());
+    }
+
+    #[test]
+    fn spark_points_flat_series_draws_a_horizontal_line() {
+        // A flat series is still data: it must produce one point per sample,
+        // all at the same height, rather than no line at all.
+        let points = spark_points(&[5, 5, 5], 5, 5, 100, 50, 0);
+        assert_eq!(points.len(), 3);
+        assert!(
+            points
+                .iter()
+                .all(|(_, y)| (*y - points[0].1).abs() < f64::EPSILON)
+        );
     }
 
     #[test]
