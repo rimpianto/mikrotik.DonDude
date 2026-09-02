@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.3] - 2026-09-02
+
+### Added
+- Text export now captures user and SSH-key state: the executed command is
+  `/user print detail; /user ssh-keys print; /export ...`, and the user/key
+  output is kept verbatim at the top of the `.rsc` between the stable header
+  block and the configuration body.
+- Binary backup download: after the text export, DonDude attempts to fetch
+  `AutomatedBinaryBackup.backup` from the device over the same SSH session and
+  commits it next to the `.rsc` as its own commit. A missing file is a warning,
+  never a failed run — the log tells you how to enable the daily scheduler on
+  the router.
+
 ## [0.4.2] - 2026-09-02
 
 ### Added
