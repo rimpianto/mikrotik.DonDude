@@ -3,7 +3,7 @@
 Multi-tenant management platform for MikroTik RouterOS fleets, with a web
 interface. A modular Rust rewrite of *the-other-dude*.
 
-Current version: **0.4.1** (see
+Current version: **0.4.2** (see
 [releases](https://github.com/rimpianto/mikrotik.DonDude/releases)).
 
 **Phase 1 (implemented): Git-versioned configuration backups.** DonDude connects

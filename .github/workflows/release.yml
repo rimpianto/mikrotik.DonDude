@@ -47,14 +47,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential cmake perl
 
+      # Each target builds on a native runner, so no --target/cross toolchain:
+      # cargo picks the host C compiler, which is all the vendored C code
+      # (libgit2/libssh2/OpenSSL) needs.
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked
 
       - name: Package
         run: |
           dir="dondude-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$dir"
-          cp target/${{ matrix.target }}/release/dondude "$dir/"
+          cp target/release/dondude "$dir/"
           cp README.md CHANGELOG.md LICENSE "$dir/"
           tar -czf "$dir.tar.gz" "$dir"
           sha256sum "$dir.tar.gz" > "$dir.tar.gz.sha256"
