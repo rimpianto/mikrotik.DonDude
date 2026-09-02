@@ -1423,3 +1423,85 @@ impl Db {
         Ok(result.rows_affected())
     }
 }
+
+
+// ---------------------------------------------------------------------------
+// Backup archive: dump and restore
+// ---------------------------------------------------------------------------
+
+impl Db {
+    /// A full logical dump as one SQL script.
+    ///
+    /// Rendering is delegated to the database itself: each table is read as
+    /// `to_jsonb` rows and replayed with `jsonb_populate_recordset` against the
+    /// *current* table type. That keeps column lists out of this file — a
+    /// migration that adds a column cannot break the backup — and sidesteps
+    /// every literal-quoting edge case, because Postgres renders and re-parses
+    /// its own values.
+    pub async fn dump_sql(&self) -> Result<String> {
+        use sqlx::Row;
+
+        let mut out = String::new();
+        out.push_str("-- DonDude logical dump\n");
+        out.push_str(&format!("-- written by {} at {}\n\n", crate::VERSION, chrono::Utc::now().to_rfc3339()));
+        // No BEGIN/COMMIT here: restore_sql wraps the replay in its own
+        // transaction, and a nested BEGIN through raw_sql would warn.
+
+        // Wipe in reverse dependency order; CASCADE covers the rest anyway.
+        let tables = crate::backup_archive::tables();
+        out.push_str("\nTRUNCATE ");
+        out.push_str(
+            &tables
+                .iter()
+                .rev()
+                .map(|t| crate::backup_archive::quote_ident(t))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        out.push_str(" CASCADE;\n");
+
+        for table in tables {
+            let ident = crate::backup_archive::quote_ident(table);
+            // Table names come from the const TABLES list, not user input.
+            let rows = sqlx::raw_sql(sqlx::AssertSqlSafe(
+                format!("SELECT to_jsonb(t) AS row FROM {ident} t"),
+            ))
+            .fetch_all(&self.pool)
+            .await?;
+            let mut json_rows: Vec<String> = Vec::with_capacity(rows.len());
+            for row in &rows {
+                let json: serde_json::Value = row.try_get("row")?;
+                let text = serde_json::to_string(&json)
+                    .map_err(|e| Error::config(format!("dump: {e}")))?;
+                json_rows.push(text);
+            }
+            out.push_str(&format!(
+                "\n-- {} rows in {table}\n",
+                json_rows.len()
+            ));
+            if !json_rows.is_empty() {
+                out.push_str(&format!(
+                    "INSERT INTO {ident} SELECT * FROM jsonb_populate_recordset(null::{table}, '[{}] '::jsonb);\n",
+                    json_rows.join(", ")
+                ));
+            }
+        }
+
+        Ok(out)
+    }
+
+    /// Replay a dump produced by [`Db::dump_sql`] inside one transaction.
+    pub async fn restore_sql(&self, sql: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        // The dump being replayed was produced by dump_sql and sealed with
+        // the master key; an attacker who could tamper with it could tamper
+        // with the database directly.
+        for statement in crate::backup_archive::split_statements(sql) {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(statement))
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+}

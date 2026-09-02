@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1] - 2026-09-02
+
+### Added
+- `dondude db backup` / `dondude db restore`: a whole deployment (all tables,
+  `.env`, SSH `known_hosts`) as one file, sealed with `DONDUDE_MASTER_KEY`.
+  Restore is transactional and asks for confirmation. First piece of the
+  update mechanism: an upgrade can now require a verified backup first.
+
 ## [0.4.0] - 2026-09-02
 
 ### Added

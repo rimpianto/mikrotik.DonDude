@@ -163,6 +163,25 @@ DonDude rewrites that banner without the timestamp but *keeps* the firmware
 version — an upgrade is a real change and belongs in the diff. Unchanged devices
 produce no write and no commit.
 
+## Backing up and restoring DonDude itself
+
+```sh
+dondude db backup            # writes dondude-backup-<timestamp>.dud
+dondude db restore FILE      # REPLACES the current data; asks first
+```
+
+The archive is a single encrypted file holding the whole deployment: every
+table, the `.env` and the SSH `known_hosts`. It is sealed with
+`DONDUDE_MASTER_KEY` — the same secret that decrypts the stored router
+credentials — so there is no second key to keep safe, and the backup cannot
+be read without it. Run `db backup` before every upgrade.
+
+`db restore` is destructive and asks for confirmation (`--yes` to skip); it
+replays the dump inside one transaction, so a failure leaves the database
+untouched. `--write-env` also drops the restored `.env` next to the current
+one as `.env.restored` for review. The archive format is portable across
+Windows, Linux and macOS.
+
 ## Command line
 
 The same binary also works from a terminal, reading the same database, which is

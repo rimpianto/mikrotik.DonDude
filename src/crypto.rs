@@ -99,6 +99,39 @@ impl MasterKey {
         Ok(B64.encode(framed))
     }
 
+    /// Encrypt raw bytes (used by the backup archive, whose payload is not
+    /// UTF-8). Same framing as [`MasterKey::seal`]: base64(nonce || ciphertext).
+    pub fn seal_bytes(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
+        let mut nonce = [0u8; NONCE_LEN];
+        fill_random(&mut nonce)?;
+        let ciphertext = self
+            .cipher()
+            .encrypt(&XNonce::from(nonce), plaintext)
+            .map_err(|_| Error::Crypto("could not seal the payload".into()))?;
+        let mut framed = Vec::with_capacity(NONCE_LEN + ciphertext.len());
+        framed.extend_from_slice(&nonce);
+        framed.extend_from_slice(&ciphertext);
+        Ok(framed)
+    }
+
+    /// Decrypt raw bytes sealed by [`MasterKey::seal_bytes`].
+    pub fn open_bytes(&self, framed: &[u8]) -> Result<Vec<u8>> {
+        if framed.len() <= NONCE_LEN {
+            return Err(Error::Crypto("sealed payload is truncated".into()));
+        }
+        let (nonce, ciphertext) = framed.split_at(NONCE_LEN);
+        let nonce = XNonce::try_from(nonce)
+            .map_err(|_| Error::Crypto("sealed payload has a malformed nonce".into()))?;
+        self.cipher()
+            .decrypt(&nonce, ciphertext)
+            .map_err(|_| {
+                Error::Crypto(format!(
+                    "could not decrypt the payload — is {MASTER_KEY_ENV} the same key that was used to create this backup?"
+                ))
+            })
+            .map(|v| v.to_vec())
+    }
+
     /// Decrypt a stored secret.
     ///
     /// Failure here almost always means the master key changed, so the message

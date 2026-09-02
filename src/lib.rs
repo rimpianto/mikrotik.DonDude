@@ -29,6 +29,7 @@
 //!   with its own remote, and DonDude refuses to use a Rust source tree for it.
 
 pub mod backup;
+pub mod backup_archive;
 pub mod config;
 pub mod crypto;
 pub mod db;

@@ -11,7 +11,8 @@
 //! container passes in. Everything an operator changes day to day lives in the
 //! database and is edited in the browser.
 
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -342,6 +343,24 @@ enum DbCommand {
     Migrate,
     /// Verify connectivity and report the server version.
     Check,
+    /// Write an encrypted, self-contained backup (database + .env + known_hosts).
+    Backup {
+        /// Directory to write to (default: current directory).
+        #[arg(value_name = "DIR", default_value = ".")]
+        path: PathBuf,
+    },
+    /// Restore a backup written by `db backup`. REPLACES the current data.
+    Restore {
+        /// The .dud archive to restore.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+        /// Do not ask for confirmation.
+        #[arg(long)]
+        yes: bool,
+        /// Also write the restored .env next to the current one (as .env.restored).
+        #[arg(long)]
+        write_env: bool,
+    },
 }
 
 #[tokio::main]
@@ -951,6 +970,18 @@ async fn db_command(action: DbCommand) -> Result<ExitCode> {
             println!("Devices:   {}", db.devices().await?.len());
             println!("Operators: {}", db.user_count().await?);
         }
+        DbCommand::Backup { path } => {
+            let code = db_backup(&db, &path).await?;
+            return Ok(code);
+        }
+        DbCommand::Restore {
+            file,
+            yes,
+            write_env,
+        } => {
+            let code = db_restore(&db, &file, yes, write_env).await?;
+            return Ok(code);
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -986,4 +1017,107 @@ async fn monitor_poll() -> Result<ExitCode> {
     }
     println!("{}", report.describe());
     Ok(ExitCode::SUCCESS)
+}
+
+
+/// Write an encrypted, self-contained deployment backup.
+///
+/// The archive is sealed with DONDUDE_MASTER_KEY: the same secret that
+/// decrypts the stored credentials decrypts the backup, so there is no
+/// second key to lose. Without the key the backup is unreadable — keep a
+/// copy of it somewhere safe, as the manual says.
+async fn db_backup(db: &Db, dir: &Path) -> Result<ExitCode> {
+    let key = db.key().clone();
+
+    let sql = db.dump_sql().await?;
+
+    // The .env file, wherever it is. Look in the obvious places: next to the
+    // working directory, then the directory the binary was started from.
+    let env_file = read_env_file();
+    let known_hosts = read_known_hosts();
+
+    let input = mikrotik_dondude::backup_archive::BackupInput {
+        database_sql: sql,
+        env_file: env_file.clone(),
+        known_hosts: known_hosts.clone(),
+    };
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let path = dir.join(format!("dondude-backup-{timestamp}.dud"));
+    input.write_archive(&path, &key)?;
+
+    println!("Backup written: {}", path.display());
+    println!();
+    println!("  contains: database");
+    if env_file.is_some() {
+        println!("            .env");
+    } else {
+        println!("            .env NOT FOUND — copy it manually (it holds the master key)");
+    }
+    if known_hosts.is_some() {
+        println!("            known_hosts");
+    }
+    println!();
+    println!("  It is encrypted with DONDUDE_MASTER_KEY.");
+    println!("  Restore with: dondude db restore {}", path.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Restore a deployment from an archive. Destructive: asks first.
+async fn db_restore(db: &Db, file: &Path, yes: bool, write_env: bool) -> Result<ExitCode> {
+    let key = db.key().clone();
+    let archive = mikrotik_dondude::backup_archive::Archive::read(file, &key)?;
+
+    println!("Archive created {} by DonDude {}",
+        archive.manifest.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
+        archive.manifest.version);
+    println!("Files: {}", archive.manifest.files.join(", "));
+
+    let Some(sql) = archive.file("database.sql") else {
+        bail!("the archive contains no database dump");
+    };
+    let sql = String::from_utf8_lossy(sql);
+
+    if !yes {
+        println!();
+        println!("This REPLACES everything currently in the database.");
+        print!("Type 'yes' to continue: ");
+        std::io::stdout().flush().ok();
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        if answer.trim() != "yes" {
+            println!("Aborted.");
+            return Ok(ExitCode::SUCCESS);
+        }
+    }
+
+    db.restore_sql(&sql).await?;
+    println!("Database restored.");
+
+    if write_env {
+        if let Some(env) = archive.file(".env") {
+            let target = PathBuf::from(".env.restored");
+            std::fs::write(&target, env)?;
+            println!(".env written to {} — review and replace your .env.",
+                target.display());
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Find the deployment's .env: working directory first, then the usual spots.
+fn read_env_file() -> Option<(String, String)> {
+    for candidate in [".env"] {
+        if let Ok(contents) = std::fs::read_to_string(candidate) {
+            return Some((contents, candidate.to_string()));
+        }
+    }
+    None
+}
+
+fn read_known_hosts() -> Option<(String, String)> {
+    let home = std::env::var_os("HOME")?;
+    let path = std::path::Path::new(&home).join(".ssh").join("known_hosts");
+    let contents = std::fs::read_to_string(&path).ok()?;
+    Some((contents, path.display().to_string()))
 }
