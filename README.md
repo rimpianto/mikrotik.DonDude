@@ -72,6 +72,15 @@ clear.
 | **Runs** | Every run, its live log while it happens, and per-device outcomes |
 | **Settings** | Backup repository and token, export detail, host-key policy, daily schedule |
 
+The interface in pictures (fresh install, no devices yet):
+
+| |
+|---|
+| [![Dashboard](docs/screenshots/dashboard.png)](docs/screenshots/dashboard.png) |
+| [![Devices](docs/screenshots/devices.png)](docs/screenshots/devices.png) |
+| [![Runs](docs/screenshots/runs.png)](docs/screenshots/runs.png) |
+| [![Settings](docs/screenshots/settings.png)](docs/screenshots/settings.png) |
+
 A **dry run** connects to every device and reports what *would* change, without
 writing, committing or pushing anything. Useful for a first look at a new fleet.
 
@@ -246,6 +255,40 @@ Device behaviour is covered with canned `/export` text, and push/fetch against a
 local bare repository created by the test. The PostgreSQL tests are skipped
 unless `TEST_DATABASE_URL` is set — and they **truncate every table**, so they
 refuse to run unless the database name contains `test`.
+
+## Troubleshooting and upgrades
+### The app container will not start
+
+`docker compose ps` shows the app as `Restarting` and **no ports**, and
+`docker compose logs app` repeats:
+
+```
+error: DONDUDE_MASTER_KEY must decode to exactly 32 bytes
+```
+
+The `DONDUDE_MASTER_KEY` in `.env` is missing, empty, or was edited by hand.
+Run `keygen` and paste its output back into `.env`:
+
+```sh
+docker compose run --rm --no-deps app keygen
+```
+
+The ports line in `docker ps` only appears once the app container actually
+stays up — a crash-looping container shows none.
+
+### Upgrading an existing installation
+
+Back up the database **before** `docker compose pull` or a rebuild, then bring
+the stack back up. See [Backup and restore](docs/MANUAL.md#backup-and-restore);
+`dondude db backup` packs the database (and `known_hosts`) into one encrypted
+file:
+
+```sh
+docker compose run --rm --no-deps app db backup /data/backups
+```
+
+Copy the resulting `.dud` file and `.env` (it holds the master key) somewhere
+safe before proceeding.
 
 ## Documentation
 

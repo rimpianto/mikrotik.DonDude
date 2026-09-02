@@ -64,6 +64,16 @@ username, and a password of at least 8 characters. That account is stored
 hashed with Argon2id; there is no recovery link, but you can reset it from the
 command line later.
 
+**Before upgrading an existing installation** (a rebuild or a new image), take
+a backup first — one encrypted file with the whole database:
+
+```sh
+docker compose run --rm --no-deps app db backup /data/backups
+```
+
+Keep the resulting `.dud` file and your `.env` (it holds the master key)
+somewhere safe; `dondude db restore` brings everything back on a fresh stack.
+
 ---
 
 ## 2. Create a user on the router
