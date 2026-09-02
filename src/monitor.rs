@@ -204,13 +204,14 @@ async fn sample_device_inner(
 /// with only the standard columns filled. Exposed for tests.
 pub fn parse_sample(resource: &str, health: Option<&str>) -> Sample {
     let r = parse_print(resource);
-    let h = health.map(parse_print).unwrap_or_default();
+    let h = health.map(parse_health).unwrap_or_default();
 
     let health_value = |key: &str, fields: &BTreeMap<String, String>| -> Option<f64> {
         fields.get(key).and_then(|v| {
-            // "24.5V" / "47C" — strip any unit suffix.
-            let trimmed = v.trim().trim_end_matches(['V', 'C', 'v', 'c']);
-            trimmed.parse::<f64>().ok()
+            // "24.5V" / "47C" / "45 C" — strip any unit suffix, then spaces.
+            let trimmed = v.trim().trim_end_matches(['V', 'C', 'v', 'c']).trim_end();
+            let first = trimmed.split_whitespace().next().unwrap_or("");
+            first.parse::<f64>().ok()
         })
     };
 
@@ -219,20 +220,55 @@ pub fn parse_sample(resource: &str, health: Option<&str>) -> Sample {
         device: String::new(),
         tenant: String::new(),
         captured_at: Utc::now(),
-        cpu_load: r.get("cpu-load").and_then(|v| v.trim().parse().ok()),
+        cpu_load: r
+            .get("cpu-load")
+            .and_then(|v| v.trim().trim_end_matches('%').parse().ok()),
         free_memory: r.get("free-memory").and_then(|v| parse_bytes(v)),
         total_memory: r.get("total-memory").and_then(|v| parse_bytes(v)),
         free_hdd: r.get("free-hdd-space").and_then(|v| parse_bytes(v)),
         total_hdd: r.get("total-hdd-space").and_then(|v| parse_bytes(v)),
         uptime_secs: r.get("uptime").and_then(|v| parse_uptime(v)),
-        voltage: health_value("voltage", &h),
-        temperature: health_value("temperature", &h),
+        voltage: health_value("voltage", &h).or_else(|| health_value("voltage2", &h)),
+        temperature: ["cpu-temperature", "temperature", "board-temperature1"]
+            .iter()
+            .find_map(|k| health_value(k, &h)),
         extra: serde_json::json!({
             "architecture": r.get("architecture-name"),
             "board_name": r.get("board-name"),
             "version": r.get("version"),
         }),
     }
+}
+
+/// `/system health print` on RouterOS 7 is a columnar table, e.g.
+/// `0  cpu-temperature        45  C`. Extract every `name value unit` row;
+/// fall back to `key: value` lines for older releases that print pairs.
+fn parse_health(raw: &str) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
+    for line in raw.lines().skip_while(|l| !l.contains("NAME")) {
+        let line = line.trim();
+        if line.is_empty()
+            || line.starts_with("NAME")
+            || line.starts_with('#') && !line.contains("  ")
+        {
+            // header line: "# NAME VALUE TYPE" — skip
+        }
+        if line.starts_with('#') || line.starts_with("NAME") || line.is_empty() {
+            continue;
+        }
+        // "0  cpu-temperature  45  C" -> name=cpu-temperature, value=45C
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 && parts[0].chars().all(|c| c.is_ascii_digit()) {
+            let name = parts[1];
+            let value = parts[2..].join(" ");
+            fields.insert(name.to_string(), value);
+        }
+    }
+    // Older releases use key: value; merge over anything columnar.
+    for (k, v) in parse_print(raw) {
+        fields.insert(k, v);
+    }
+    fields
 }
 
 /// RouterOS `print` output: `key: value` lines. Shared shape with the export
@@ -363,5 +399,20 @@ mod tests {
         assert_eq!(parse_bytes("405MiB"), Some(424_673_280));
         assert_eq!(parse_bytes("1024"), Some(1024));
         assert_eq!(parse_bytes("weird"), None);
+    }
+}
+
+#[cfg(test)]
+mod knot_parse_tests {
+    use super::*;
+
+    #[test]
+    fn parse_knot_like_output() {
+        let resource = "uptime: 3h13m50s           \n                  version: 7.24.1 (stable)    \n               free-memory: 49.7MiB            \n             total-memory: 256.0MiB           \n                      cpu: ARM                \n                cpu-count: 1                  \n                 cpu-load: 23%                \n           free-hdd-space: 425.5MiB           \n             total-hdd-space: 512.0MiB         \n          bad-blocks: 0%                 \n        architecture-name: arm                \n          board-name: KNOT Embedded LTE4 \n";
+        let health = "Columns: NAME, VALUE, TYPE\n#  NAME                VALUE  TYPE\n0  cpu-temperature        45  C   \n1  board-temperature1     40  C   \n";
+        let s = crate::monitor::parse_sample(resource, Some(health));
+        assert_eq!(s.cpu_load, Some(23));
+        assert_eq!(s.temperature, Some(45.0));
+        assert!(s.free_memory.is_some());
     }
 }
