@@ -202,7 +202,7 @@ recently, so a restart cannot make it fire twice.
 |---|---|
 | **Name** | Unique and stable. Becomes the file name, so renaming moves the history path. |
 | **Host / port** | How DonDude reaches it. |
-| **SSH username** | A read-only RouterOS account is enough: `policy=ssh,read`. |
+| **SSH username** | A read-only RouterOS account is enough: `policy=ssh,read`. Add `ftp,sensitive` if you use the daily binary `.backup` download (see [GETTING-STARTED](GETTING-STARTED.md#2-create-a-user-on-the-router)). |
 | **Tenant** | Grouping; becomes a folder in the repository. Created on first mention. |
 | **Tags** | Comma separated. Lets a run cover part of the fleet. |
 | **Method** | Password, an SSH private key, or a key held by `ssh-agent`. |
@@ -500,7 +500,7 @@ that has to hold.
 `has_secret: bool`, not the secret. Types holding credentials have hand-written
 `Debug` implementations that redact, so nothing leaks through a log line.
 
-**On the routers.** A read-only account (`policy=ssh,read`) with `address=`
+**On the routers.** A read-only account (`policy=ssh,read`, plus `ftp,sensitive` for the binary backup download) with `address=`
 restricted to the network DonDude runs on. Exports omit secrets by default.
 
 **What is not covered.** There is no audit log of configuration changes made in

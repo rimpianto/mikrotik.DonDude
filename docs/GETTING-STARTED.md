@@ -81,13 +81,21 @@ somewhere safe; `dondude db restore` brings everything back on a fresh stack.
 DonDude only ever reads. Give it an account that can do nothing else:
 
 ```
-/user group add name=backup policy=ssh,read
+/user group add name=backup policy=ssh,read,ftp,sensitive
 /user add name=dondude-backup group=backup password="pick-something-long" \
     address=192.168.1.0/24
 ```
 
-`ssh` lets it log in, `read` lets it read the configuration. Nothing else is
-needed — not `write`, not `test`.
+What each policy is for:
+
+| Policy | Needed for |
+|---|---|
+| `ssh` | Logging in and running commands |
+| `read` | Reading the configuration |
+| `ftp` | File transfer over SSH (SFTP/SCP): downloading the daily `.backup` file. **Not** the FTP TCP service — that can stay disabled in `/ip service`. |
+| `sensitive` | Reading `.backup` files (they contain passwords) and producing `show-sensitive` exports |
+
+Nothing else is needed — not `write`, not `test`.
 
 Set `address=` to the network DonDude runs on, so the account is useless from
 anywhere else.
@@ -98,11 +106,28 @@ Check that SSH is enabled:
 /ip service print
 ```
 
-`ssh` must not be `disabled`.
+`ssh` must not be `disabled`. The `ftp` service does **not** need to be
+enabled: on RouterOS the file system is served by the FTP subsystem, but the
+SFTP/SCP file transfer runs inside SSH.
 
-> Add `sensitive` to the group's policy **only** if you later turn on *include
-> secrets in exports*. That setting writes PSKs, PPP passwords and SNMP
-> communities into Git in clear text, and is off by default for that reason.
+### The daily binary backup (optional but recommended)
+
+DonDude also downloads a full binary backup — passwords and MAC addresses
+included — if the router produces one daily:
+
+```
+/system scheduler add name=DailyBinaryBackup interval=1d start-time=03:00:00 \
+    on-event="/system backup save name=AutomatedBinaryBackup dont-encrypt=yes"
+```
+
+If the file is missing, DonDude logs a warning with this very command and the
+run still succeeds. Store `.rsc` and `.backup` together: the `.rsc` is the
+auditable, diffable history; the `.backup` is what you restore in a
+disaster-recovery scenario.
+
+> The `sensitive` policy is what allows reading the `.backup` file. Without it
+> the export still works, but the binary download is refused with
+> *Permission denied* and reported as "not found".
 
 ---
 

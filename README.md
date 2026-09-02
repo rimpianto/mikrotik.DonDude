@@ -133,13 +133,16 @@ rather than forking it, so several installations can share one backup repository
 A dedicated read-only account is enough:
 
 ```
-/user group add name=backup policy=ssh,read
+/user group add name=backup policy=ssh,read,ftp,sensitive
 /user add name=dondude-backup group=backup password="..." address=10.0.0.0/24
 ```
 
-`ssh` is needed to log in and `read` to read the configuration; nothing else is
-required. Add `sensitive` only if you turn on *include secrets in exports* — which is off by default, because those values would be committed to
-Git in clear text and the repository is a softer target than the routers.
+`ssh` is needed to log in and `read` to read the configuration. `ftp` allows
+file transfer over SSH (SFTP/SCP — the FTP TCP service stays disabled) and
+`sensitive` allows reading `.backup` files and secret exports. Do **not** add
+`write`, `policy` or `reboot`: DonDude only ever reads. See
+[GETTING-STARTED](docs/GETTING-STARTED.md) for the full rationale and the
+optional daily binary backup.
 
 Host keys are verified with an `accept-new` policy by default: the key is
 recorded on first connection and a later change is refused. `known_hosts` lives
