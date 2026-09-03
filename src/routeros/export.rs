@@ -176,10 +176,13 @@ pub fn render(
         return ensure_trailing_newline(&normalize_newlines(raw));
     }
 
-    // The `/user` print output ahead of the export banner is kept verbatim:
-    // it is live state, not config, and there is nothing volatile in it to
-    // normalize. Empty captures (no prefix) add nothing.
+    // The `/user` print output ahead of the export banner is live state, not
+    // config, and there is nothing volatile in it to normalize. Each line is
+    // prefixed with `# REM ` so the captured state stays readable in the
+    // versioned file yet is ignored by RouterOS if the `.rsc` is ever pasted
+    // or imported back onto a device. Empty captures (no prefix) add nothing.
     let prefix = ensure_trailing_newline(&normalize_newlines(prefix));
+    let prefix = comment_as_rem(&prefix);
     let body = strip_banner(export_part);
 
     let mut out = String::with_capacity(body.len() + 256);
@@ -198,6 +201,26 @@ pub fn render(
     out.push_str(&prefix);
     out.push_str(&body);
     ensure_trailing_newline(&out)
+}
+
+/// Prefix every non-empty line with `# REM `, so captured live state reads
+/// as a comment block inside the `.rsc`. Blank lines pass through unchanged
+/// to keep the block visually intact.
+fn comment_as_rem(block: &str) -> String {
+    block
+        .lines()
+        .map(|line| {
+            if line.trim().is_empty() {
+                String::new()
+            } else {
+                format!("# REM {line}")
+            }
+        })
+        .fold(String::new(), |mut out, line| {
+            out.push_str(&line);
+            out.push('\n');
+            out
+        })
 }
 
 /// Split combined command output at the RouterOS export banner.
@@ -458,7 +481,7 @@ add admin-mac=48:A9:8A:00:00:01 auto-mac=no comment=defconf name=bridge
     }
 
     #[test]
-    fn user_prints_are_kept_verbatim_between_header_and_config() {
+    fn user_prints_are_kept_as_rem_comments_between_header_and_config() {
         let out = normalize(
             V7_PRINTS_THEN_EXPORT,
             "/user print detail; /user ssh-keys print; /export terse",
@@ -467,13 +490,19 @@ add admin-mac=48:A9:8A:00:00:01 auto-mac=no comment=defconf name=bridge
         );
         // Header first.
         assert!(out.contents.starts_with("# RouterOS configuration export"));
-        // Then the user/ssh-keys state, verbatim (right after the bare "#"
-        // line that closes the header block).
+        // Then the user/ssh-keys state as `# REM` lines (right after the bare
+        // "#" line that closes the header block) — readable in the file,
+        // inert if the .rsc is ever re-imported.
         let header_end = out.contents.find("#\n").expect("end of header block");
         let after_header = &out.contents[header_end + 2..];
-        assert!(after_header.starts_with("Flags: A - disabled"));
-        assert!(after_header.contains("name=\"admin\""));
-        assert!(after_header.contains("key-owner=\"ssh-rsa"));
+        assert!(after_header.starts_with("# REM Flags: A - disabled"));
+        assert!(out.contents.contains("# REM  0 A name=\"admin\""));
+        assert!(
+            out.contents
+                .contains("# REM  0 user=\"admin\" key-owner=\"ssh-rsa")
+        );
+        // No uncommented state lines survive.
+        assert!(!out.contents.contains("\nFlags: A - disabled"));
         // Then the stripped config body.
         assert!(out.contents.contains("/interface bridge"));
         assert!(!out.contents.contains("by RouterOS 7.13.2\n"));

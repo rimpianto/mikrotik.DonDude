@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.7] - 2026-09-03
+
+### Changed
+- The captured `/user print detail` and `/user ssh-keys print` block in each
+  `.rsc` is now prefixed line-by-line with `# REM `, so the live user/key state
+  stays readable in the versioned file but is inert if the export is ever
+  pasted into a router terminal or re-imported (RouterOS skips the comments).
+  Blank lines inside the block pass through unchanged.
+
 ## [0.4.6] - 2026-09-03
 
 ### Fixed
