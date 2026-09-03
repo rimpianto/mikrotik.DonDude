@@ -1,0 +1,35 @@
+# Smoke-build the container image on every push to main. A broken Dockerfile
+# (a missing COPY, a stale build step) must fail here, at commit time, instead
+# of at release time — the release pipeline builds both images from this same
+# file. Builds without pushing: the artifact is thrown away.
+name: docker-smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Dockerfile build (no push)
+    # Whichever self-hosted runner is free; the Dockerfile is arch-neutral
+    # (vendored C deps build natively), so either works.
+    runs-on: [self-hosted, Linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image, run nothing
+        run: docker build -t dondude-smoke:${GITHUB_SHA} .
+
+      # The compiled binary must at least answer --version inside the image,
+      # which also proves the favicon bytes link in cleanly.
+      - name: Smoke-test the binary
+        run: docker run --rm dondude-smoke:${GITHUB_SHA} dondude --version
+
+      - name: Clean up
+        if: always()
+        run: docker rmi dondude-smoke:${GITHUB_SHA} 2>/dev/null || true
