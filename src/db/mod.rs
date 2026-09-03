@@ -152,6 +152,15 @@ pub struct Settings {
     pub monitor_enabled: bool,
     pub monitor_interval_secs: i32,
     pub monitor_retention_days: i32,
+    /// SMTP relay for run notifications. `None` host means "never send".
+    pub smtp_host: Option<String>,
+    pub smtp_port: i32,
+    pub smtp_username: Option<String>,
+    pub has_smtp_password: bool,
+    pub notify_from: Option<String>,
+    pub notify_to: Option<String>,
+    /// true: only failed runs send mail; false: every scheduled run does.
+    pub notify_on_failure_only: bool,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -282,6 +291,13 @@ impl Settings {
             monitor_enabled: self.monitor_enabled,
             monitor_interval_secs: self.monitor_interval_secs,
             monitor_retention_days: self.monitor_retention_days,
+            smtp_host: self.smtp_host.clone(),
+            smtp_port: self.smtp_port,
+            smtp_username: self.smtp_username.clone(),
+            smtp_password: None,
+            notify_from: self.notify_from.clone(),
+            notify_to: self.notify_to.clone(),
+            notify_on_failure_only: self.notify_on_failure_only,
         }
     }
 }
@@ -311,6 +327,14 @@ pub struct SettingsInput {
     pub monitor_enabled: bool,
     pub monitor_interval_secs: i32,
     pub monitor_retention_days: i32,
+    pub smtp_host: Option<String>,
+    pub smtp_port: i32,
+    pub smtp_username: Option<String>,
+    /// None keeps the stored password, Some("") clears it, Some(p) replaces.
+    pub smtp_password: Option<String>,
+    pub notify_from: Option<String>,
+    pub notify_to: Option<String>,
+    pub notify_on_failure_only: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -661,7 +685,10 @@ impl Db {
                     export_mode, show_sensitive, concurrency, connect_timeout_secs,
                     command_timeout_secs, host_key_policy, schedule_enabled, schedule_hour,
                     schedule_minute, monitor_enabled, monitor_interval_secs,
-                    monitor_retention_days
+                    monitor_retention_days,
+                    smtp_host, smtp_port, smtp_username,
+                    smtp_password_sealed IS NOT NULL AS has_smtp_password,
+                    notify_from, notify_to, notify_on_failure_only
                FROM settings WHERE id",
         )
         .fetch_one(&self.pool)
@@ -689,7 +716,42 @@ impl Db {
             monitor_enabled: row.try_get("monitor_enabled")?,
             monitor_interval_secs: row.try_get("monitor_interval_secs")?,
             monitor_retention_days: row.try_get("monitor_retention_days")?,
+            smtp_host: row.try_get("smtp_host")?,
+            smtp_port: row.try_get("smtp_port")?,
+            smtp_username: row.try_get("smtp_username")?,
+            has_smtp_password: row.try_get("has_smtp_password")?,
+            notify_from: row.try_get("notify_from")?,
+            notify_to: row.try_get("notify_to")?,
+            notify_on_failure_only: row.try_get("notify_on_failure_only")?,
         })
+    }
+
+    /// The mail configuration for run notifications, or `None` when no
+    /// SMTP host is configured. Unseals the password here so no caller
+    /// handles ciphertext.
+    pub async fn mail_config(&self) -> Result<Option<crate::notify::MailConfig>> {
+        let settings = self.settings().await?;
+        let (Some(host), Some(from), Some(to)) = (
+            settings.smtp_host.clone(),
+            settings.notify_from.clone(),
+            settings.notify_to.clone(),
+        ) else {
+            return Ok(None);
+        };
+        let username = settings.smtp_username.clone().unwrap_or_default();
+        let password = match self.smtp_password().await? {
+            Some(password) => password,
+            None => return Ok(None), // host set but no password: incomplete
+        };
+        Ok(Some(crate::notify::MailConfig {
+            host,
+            port: settings.smtp_port.clamp(1, 65535) as u16,
+            username,
+            password,
+            from,
+            to,
+            failure_only: settings.notify_on_failure_only,
+        }))
     }
 
     pub async fn update_settings(&self, input: &SettingsInput) -> Result<()> {
@@ -723,7 +785,10 @@ impl Db {
                  schedule_enabled = $14, schedule_hour = $15, schedule_minute = $16,
                  allow_invalid_certs = $17,
                  monitor_enabled = $18, monitor_interval_secs = $19,
-                 monitor_retention_days = $20, updated_at = now()
+                 monitor_retention_days = $20,
+                 smtp_host = $21, smtp_port = $22, smtp_username = $23,
+                 notify_from = $24, notify_to = $25,
+                 notify_on_failure_only = $26, updated_at = now()
              WHERE id",
         )
         .bind(input.path_template.trim())
@@ -752,8 +817,52 @@ impl Db {
         .bind(input.monitor_enabled)
         .bind(input.monitor_interval_secs)
         .bind(input.monitor_retention_days)
+        .bind(
+            input
+                .smtp_host
+                .as_deref()
+                .map(str::trim)
+                .filter(|h| !h.is_empty()),
+        )
+        .bind(input.smtp_port)
+        .bind(
+            input
+                .smtp_username
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| !u.is_empty()),
+        )
+        .bind(
+            input
+                .notify_from
+                .as_deref()
+                .map(str::trim)
+                .filter(|f| !f.is_empty()),
+        )
+        .bind(
+            input
+                .notify_to
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty()),
+        )
+        .bind(input.notify_on_failure_only)
         .execute(&mut *tx)
         .await?;
+
+        // Same convention as the git token: None keeps, Some("") clears,
+        // Some(p) seals a new password.
+        let sealed_smtp = match input.smtp_password.as_deref().map(str::trim) {
+            None => None,
+            Some("") => Some(None),
+            Some(p) => Some(Some(self.key.seal(p)?)),
+        };
+        if let Some(value) = sealed_smtp {
+            sqlx::query("UPDATE settings SET smtp_password_sealed = $1 WHERE id")
+                .bind(value)
+                .execute(&mut *tx)
+                .await?;
+        }
 
         if let Some(value) = sealed {
             sqlx::query("UPDATE settings SET git_token_sealed = $1 WHERE id")
@@ -1075,6 +1184,17 @@ impl Db {
     pub async fn git_token(&self) -> Result<Option<String>> {
         let (sealed,): (Option<String>,) =
             sqlx::query_as("SELECT git_token_sealed FROM settings WHERE id")
+                .fetch_one(&self.pool)
+                .await?;
+        match sealed {
+            Some(sealed) => Ok(Some(self.key.open(&sealed)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn smtp_password(&self) -> Result<Option<String>> {
+        let (sealed,): (Option<String>,) =
+            sqlx::query_as("SELECT smtp_password_sealed FROM settings WHERE id")
                 .fetch_one(&self.pool)
                 .await?;
         match sealed {

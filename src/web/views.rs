@@ -1080,6 +1080,63 @@ pub fn settings(
                     div.hint { "Times are UTC, so they do not shift with daylight saving." }
                 }
 
+                h2 { "Email notifications" }
+                div.card {
+                    p.small {
+                        "After every scheduled run DonDude emails the report to the
+                         address below. Manual and CLI runs never send mail."
+                    }
+                    label { "SMTP host" }
+                    input type="text" name="smtp_host" value=(settings.smtp_host.as_deref().unwrap_or(""))
+                        placeholder="mail.example.com";
+                    div.row {
+                        label {
+                            "Port"
+                            input type="number" name="smtp_port" min="1" max="65535"
+                                value=(settings.smtp_port);
+                        }
+                        label {
+                            "Username (the full email address)"
+                            input type="text" name="smtp_username"
+                                value=(settings.smtp_username.as_deref().unwrap_or(""));
+                        }
+                    }
+                    label {
+                        "SMTP password"
+                        @if settings.has_smtp_password {
+                            input type="password" name="smtp_password" placeholder="stored — leave empty to keep, '-' to clear";
+                        } @else {
+                            input type="password" name="smtp_password" placeholder="password";
+                        }
+                    }
+                    div.row {
+                        label {
+                            "From"
+                            input type="text" name="notify_from"
+                                value=(settings.notify_from.as_deref().unwrap_or(""))
+                                placeholder="no-reply@example.com";
+                        }
+                        label {
+                            "To"
+                            input type="text" name="notify_to"
+                                value=(settings.notify_to.as_deref().unwrap_or(""))
+                                placeholder="noc@example.com";
+                        }
+                    }
+                    label.check {
+                        input type="checkbox" name="notify_on_failure_only" value="1"
+                            checked[settings.notify_on_failure_only];
+                        " Only email when something failed (quiet when all is fine)"
+                    }
+                    div.hint {
+                        "Port 465 (implicit TLS) or 587 (STARTTLS). The password is
+                         sealed with the master key and never rendered back."
+                    }
+                    button type="submit" formaction="/settings/email-test" formnovalidate {
+                        "Send test email"
+                    }
+                }
+
                 h2 { "Advanced" }
                 div.card {
                     div.row {

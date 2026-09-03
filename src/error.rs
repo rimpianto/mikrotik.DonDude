@@ -68,6 +68,12 @@ pub enum Error {
     #[error("{0}")]
     Crypto(String),
 
+    #[error("email notification failed: {0}")]
+    Mail(#[from] lettre::error::Error),
+
+    #[error("SMTP transport failed: {0}")]
+    Smtp(#[from] lettre::transport::smtp::Error),
+
     #[error("{0} not found")]
     NotFound(&'static str),
 }

@@ -36,6 +36,7 @@ pub mod db;
 pub mod error;
 pub mod git;
 pub mod monitor;
+pub mod notify;
 pub mod routeros;
 pub mod web;
 

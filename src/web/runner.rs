@@ -143,6 +143,7 @@ impl RunManager {
             db,
             repo_path,
             run_id,
+            trigger.to_string(),
             filter,
             dry_run,
             run_lock,
@@ -184,11 +185,13 @@ impl RunManager {
 /// A free function rather than a method so the spawned future has no
 /// higher-ranked lifetimes to satisfy. Whatever happens, the run is marked
 /// finished — otherwise the UI would sit at "in progress" forever.
+#[allow(clippy::too_many_arguments)] // every argument is owned state for the spawned run
 async fn execute(
     manager: Arc<RunManager>,
     db: Arc<Db>,
     repo_path: PathBuf,
     run_id: Uuid,
+    trigger: String,
     filter: DeviceFilter,
     dry_run: bool,
     // Held for the whole run and dropped on the way out, which is what releases
@@ -221,6 +224,11 @@ async fn execute(
             }
             manager.finish(&summary, report.exit_code() != 0);
             info!(%run_id, "{summary}");
+
+            // Scheduled runs report by email — manual and CLI runs do not.
+            if trigger == crate::web::TRIGGER_SCHEDULE {
+                notify(&db, &report).await;
+            }
         }
         Err(error) => {
             let message = crate::error::chain(&error);
@@ -232,6 +240,26 @@ async fn execute(
             manager.finish(&format!("aborted: {message}"), true);
             error!(%run_id, "run aborted: {message}");
         }
+    }
+}
+
+/// Email the run report if the settings ask for one. Every failure is
+/// logged and swallowed: mail must never break a backup run.
+async fn notify(db: &Db, report: &crate::backup::RunReport) {
+    let mail = match db.mail_config().await {
+        Ok(Some(mail)) => mail,
+        Ok(None) => return, // not configured
+        Err(error) => {
+            tracing::warn!(%error, "could not read the notification settings");
+            return;
+        }
+    };
+    if mail.failure_only && report.failed() == 0 && report.exit_code() == 0 {
+        return;
+    }
+    match crate::notify::send_report(&mail, report).await {
+        Ok(()) => tracing::info!("run report emailed to {}", mail.to),
+        Err(error) => tracing::warn!(%error, "could not email the run report"),
     }
 }
 

@@ -690,6 +690,13 @@ pub struct SettingsForm {
     monitor_enabled: Option<String>,
     monitor_interval_secs: String,
     monitor_retention_days: String,
+    smtp_host: String,
+    smtp_port: String,
+    smtp_username: String,
+    smtp_password: String,
+    notify_from: String,
+    notify_to: String,
+    notify_on_failure_only: Option<String>,
     concurrency: String,
     connect_timeout_secs: String,
     command_timeout_secs: String,
@@ -738,6 +745,18 @@ impl SettingsForm {
             schedule_hour: number(&self.schedule_hour, 2, 0, 23),
             schedule_minute: number(&self.schedule_minute, 30, 0, 59),
             monitor_enabled: self.monitor_enabled.is_some(),
+            smtp_host: Some(self.smtp_host.clone()).filter(|h| !h.trim().is_empty()),
+            smtp_port: number(&self.smtp_port, 465, 1, 65535),
+            smtp_username: Some(self.smtp_username.clone()).filter(|u| !u.trim().is_empty()),
+            // Same convention as the git token: empty keeps, "-" clears.
+            smtp_password: match self.smtp_password.trim() {
+                "" => None,
+                "-" => Some(String::new()),
+                password => Some(password.to_string()),
+            },
+            notify_from: Some(self.notify_from.clone()).filter(|f| !f.trim().is_empty()),
+            notify_to: Some(self.notify_to.clone()).filter(|t| !t.trim().is_empty()),
+            notify_on_failure_only: self.notify_on_failure_only.is_some(),
             monitor_interval_secs: number(&self.monitor_interval_secs, 60, 10, 3600),
             monitor_retention_days: number(&self.monitor_retention_days, 30, 1, 3650),
             allow_invalid_certs: self.allow_invalid_certs.is_some(),
@@ -794,6 +813,60 @@ pub async fn favicon() -> Result<Response> {
         axum::http::HeaderValue::from_static("public, max-age=604800"),
     );
     Ok(response)
+}
+
+/// Send a test email with the submitted settings, so the operator can
+/// confirm the relay works before relying on it. Saves first — testing
+/// values that were not stored is how surprises happen at 03:00.
+pub async fn test_email(
+    State(state): State<AppState>,
+    Operator(user): Operator,
+    Form(form): Form<SettingsForm>,
+) -> Result {
+    if let Err(error) = state.db.update_settings(&form.to_input()).await {
+        let settings = state.db.settings().await?;
+        return Ok(page(views::settings(
+            &user,
+            &settings,
+            &state.repo_path.display().to_string(),
+            None,
+            Some(&crate::error::chain(&error)),
+        )));
+    }
+
+    let message = match state.db.mail_config().await {
+        Ok(Some(mail)) => {
+            let probe = crate::backup::RunReport {
+                started_at: chrono::Utc::now(),
+                elapsed: std::time::Duration::from_secs(0),
+                devices: vec![],
+                sync: None,
+                push: crate::backup::PushReport::Skipped("test"),
+                dry_run: false,
+            };
+            match crate::notify::send_report(&mail, &probe).await {
+                Ok(()) => format!("Test email sent to {}.", mail.to),
+                Err(error) => format!("Send failed: {}", crate::error::chain(&error)),
+            }
+        }
+        Ok(None) => {
+            "Notifications are not fully configured (host, from, to and password are all needed)."
+                .to_string()
+        }
+        Err(error) => format!(
+            "Could not read the settings: {}",
+            crate::error::chain(&error)
+        ),
+    };
+
+    let settings = state.db.settings().await?;
+    Ok(page(views::settings(
+        &user,
+        &settings,
+        &state.repo_path.display().to_string(),
+        Some(&message),
+        None,
+    )))
 }
 
 /// Serve the fleet backup as a download: the same encrypted `.dud` archive

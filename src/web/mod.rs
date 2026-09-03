@@ -143,6 +143,7 @@ pub fn router(state: AppState) -> Router {
             get(routes::settings_page).post(routes::save_settings),
         )
         .route("/settings/test", post(routes::test_remote))
+        .route("/settings/email-test", post(routes::test_email))
         .route("/backup", get(routes::download_backup))
         .route("/favicon.ico", get(routes::favicon))
         .fallback(routes::not_found)
