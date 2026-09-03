@@ -23,6 +23,7 @@ RUN mkdir -p src \
  && rm -rf src target/release/dondude target/release/deps/mikrotik_dondude*
 
 COPY src ./src
+COPY static ./static
 RUN touch src/main.rs src/lib.rs && cargo build --release --locked
 
 # ---------------------------------------------------------------------------
