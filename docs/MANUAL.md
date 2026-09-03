@@ -183,6 +183,31 @@ A daily run at a fixed time, in **UTC** so it does not move with daylight
 saving. The scheduler asks the database whether a scheduled run already started
 recently, so a restart cannot make it fire twice.
 
+### Email notifications
+
+After every **scheduled** run DonDude can email the report: one line per
+device (outcome and detail), the tally, and whether the push succeeded.
+Manual runs and `dondude backup run` never send mail, so you can click
+around freely.
+
+| Field | What it is |
+|---|---|
+| SMTP host | The relay, e.g. `mail.example.com` |
+| Port | 465 (implicit TLS) or 587 |
+| Username | Usually the full email address |
+| SMTP password | Sealed with the master key; left blank it keeps the stored one, a lone `-` clears it |
+| From | The sender address the relay allows |
+| To | The mailbox that receives the reports (e.g. the NOC) |
+| Only email when something failed | Quiet mode: healthy runs send nothing |
+
+**Send test email** stores the form first and then sends a probe through
+the relay — a wrong password or a closed port surfaces immediately,
+not at the next 03:00 run. The probe has an empty device list and says
+`Push: skipped (test)`, so it is recognizable in the mailbox.
+
+Notification failures never fail a backup run: if the relay is down at
+03:00 the run still completes and the failure lands in the log only.
+
 ### Advanced
 
 | Field | Notes |

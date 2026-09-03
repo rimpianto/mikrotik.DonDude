@@ -24,7 +24,8 @@ Monitoring** or try it once with `dondude monitor poll`.
 
 Each run also downloads the router's binary `.backup` file when one exists (a
 daily scheduler on the router produces it — the device page shows the exact
-commands to enable, with copy buttons). The captured user and SSH-key state is
+commands to enable, with copy buttons). Scheduled runs can email the report
+to a fixed address — plain text, per-device lines, one mail per run. The captured user and SSH-key state is
 kept in the `.rsc` as `# REM` comment lines, so the export stays readable but
 inert if re-imported. Upgrading a deployment is one command:
 `dondude update now`.
@@ -77,7 +78,7 @@ clear.
 | **Devices** | Add, edit, enable and delete routers; test a connection |
 | **Device → history** | Every commit that changed that router, with a coloured diff |
 | **Runs** | Every run, its live log while it happens, and per-device outcomes |
-| **Settings** | Backup repository and token, export detail, host-key policy, daily schedule, deployment backup download |
+| **Settings** | Backup repository and token, export detail, host-key policy, daily schedule, email notifications, deployment backup download |
 
 The interface in pictures (fresh install, no devices yet):
 
