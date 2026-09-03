@@ -6,7 +6,7 @@ New here? [READMEFIRST.md](READMEFIRST.md) picks the right path
 Multi-tenant management platform for MikroTik RouterOS fleets, with a web
 interface. A modular Rust rewrite of *the-other-dude*.
 
-Current version: **0.4.3** (see
+Current version: **0.5.0** (see
 [releases](https://github.com/rimpianto/mikrotik.DonDude/releases)).
 
 **Phase 1 (implemented): Git-versioned configuration backups.** DonDude connects
@@ -21,6 +21,13 @@ enabled device on a configurable interval (default 60 s) over the same SSH
 transport the backups use, and records CPU load, memory, disk, uptime and board
 health to PostgreSQL with a retention window. Enable it in **Settings →
 Monitoring** or try it once with `dondude monitor poll`.
+
+Each run also downloads the router's binary `.backup` file when one exists (a
+daily scheduler on the router produces it — the device page shows the exact
+commands to enable, with copy buttons). The captured user and SSH-key state is
+kept in the `.rsc` as `# REM` comment lines, so the export stays readable but
+inert if re-imported. Upgrading a deployment is one command:
+`dondude update now`.
 
 Planned next: live dashboard charts and alerting on this data, SNMP, safe-mode
 config pushes with automatic rollback, firmware management, and SRP-6a
@@ -70,7 +77,7 @@ clear.
 | **Devices** | Add, edit, enable and delete routers; test a connection |
 | **Device → history** | Every commit that changed that router, with a coloured diff |
 | **Runs** | Every run, its live log while it happens, and per-device outcomes |
-| **Settings** | Backup repository and token, export detail, host-key policy, daily schedule |
+| **Settings** | Backup repository and token, export detail, host-key policy, daily schedule, deployment backup download |
 
 The interface in pictures (fresh install, no devices yet):
 
@@ -188,6 +195,9 @@ dondude db backup            # writes dondude-backup-<timestamp>.dud
 dondude db restore FILE      # REPLACES the current data; asks first
 ```
 
+The same archive can be downloaded from the browser: **Settings →
+Deployment backup → Download backup (.dud)**.
+
 The archive is a single encrypted file holding the whole deployment: every
 table, the `.env` and the SSH `known_hosts`. It is sealed with
 `DONDUDE_MASTER_KEY` — the same secret that decrypts the stored router
@@ -280,6 +290,18 @@ The ports line in `docker ps` only appears once the app container actually
 stays up — a crash-looping container shows none.
 
 ### Upgrading an existing installation
+
+A Compose deployment cloned from the repository upgrades itself:
+
+```sh
+dondude update now --dir /opt/mikrotik.DonDude
+```
+
+It dumps the database first, preserves local changes (the compose file is
+expected to be customized), pulls, rebuilds and switches — stopping at the
+first failure so the running container is never left half upgraded. The manual
+steps it automates are documented in
+[GETTING-STARTED](docs/GETTING-STARTED.md#upgrading-a-deployment).
 
 Back up the database **before** `docker compose pull` or a rebuild, then bring
 the stack back up. See [Backup and restore](docs/MANUAL.md#backup-and-restore);
