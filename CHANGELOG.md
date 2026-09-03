@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.2] - 2026-09-03
+
+### Fixed
+- `dondude update now` failed at the database-dump step when `DATABASE_URL`
+  was not set on the host — which is the normal case for a Compose deployment.
+  The dump now runs `pg_dump` inside the `db` container over its local socket,
+  so no database credentials are needed on the host.
+
 ## [0.5.1] - 2026-09-03
 
 ### Added
