@@ -28,7 +28,7 @@ jobs:
       # The compiled binary must at least answer --version inside the image,
       # which also proves the favicon bytes link in cleanly.
       - name: Smoke-test the binary
-        run: docker run --rm dondude-smoke:${GITHUB_SHA} dondude --version
+        run: docker run --rm --entrypoint dondude dondude-smoke:${GITHUB_SHA} --version
 
       - name: Clean up
         if: always()
