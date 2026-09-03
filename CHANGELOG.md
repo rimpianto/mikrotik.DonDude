@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0] - 2026-09-03
+
+### Added
+- `dondude update now`: the one-command upgrade path for a Docker Compose
+  deployment. Dumps the database first, stashes local changes (the compose
+  file is expected to be customized), pulls, rebuilds, and switches —
+  stopping at the first failure so the running container is never left half
+  upgraded. The documented manual ritual stays in the guide for when the CLI
+  cannot be used.
+- Docs: an "Upgrading a deployment" section in GETTING-STARTED covering the
+  pre-upgrade database dump and the full step order.
+
 ## [0.4.7] - 2026-09-03
 
 ### Changed

@@ -262,6 +262,52 @@ That is it. Nothing else to set up — no cron, no systemd timer.
 
 ---
 
+## Upgrading a deployment
+
+The upgrade ritual, in one command:
+
+```sh
+dondude update now --dir /opt/mikrotik.DonDude
+```
+
+It automates the exact steps below, in the same order, and stops at the first
+failure — the running container keeps serving until the very last step, so a
+broken build costs nothing but time.
+
+The ritual it performs (worth knowing by hand):
+
+1. **Dump the database first.** An upgrade can apply schema migrations, and
+   those are one-way. The dump is the only way back:
+
+   ```sh
+   docker exec mikrotikdondude-db-1 pg_dump -U dondude -d dondude -Fc \
+     -f /tmp/dondude-pre-upgrade.dump
+   docker cp mikrotikdondude-db-1:/tmp/dondude-pre-upgrade.dump \
+     ~/dondude-pre-upgrade.dump
+   ```
+
+2. **Pull the code**, keeping local changes (the compose file is commonly
+   customized — port bindings, volumes):
+
+   ```sh
+   cd /opt/mikrotik.DonDude
+   git stash && git pull --ff-only && git stash pop
+   ```
+
+3. **Rebuild and switch:**
+
+   ```sh
+   docker compose build app
+   docker compose up -d
+   ```
+
+Migrations run automatically when the new container boots; the log line
+`database schema is up to date` confirms it. The web UI also offers a
+downloadable encrypted archive (Settings → *Deployment backup*) which holds the
+database plus `.env` and `known_hosts` — grab one before big upgrades.
+
+---
+
 ## Doing all of this from a script instead
 
 Everything above except creating the first operator account can be done from the

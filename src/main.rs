@@ -112,8 +112,34 @@ enum Command {
         action: DbCommand,
     },
 
+    /// Update a Docker Compose deployment to the latest release.
+    #[command(subcommand_required = true, arg_required_else_help = true)]
+    Update {
+        #[command(subcommand)]
+        action: UpdateCommand,
+    },
+
     /// Generate a master key for encrypting stored credentials.
     Keygen,
+}
+
+#[derive(Debug, Subcommand)]
+enum UpdateCommand {
+    /// Pull the latest code and rebuild the Compose app service.
+    ///
+    /// Automates the documented upgrade ritual: dump the database first,
+    /// `git pull --ff-only`, `docker compose build app`, `docker compose up -d`,
+    /// then report the running version. Local changes to tracked files abort
+    /// the run (commit or stash them first); the compose file is commonly
+    /// customized, so it is stashed and restored automatically.
+    Now {
+        /// Directory holding the compose project (default: current directory).
+        #[arg(long, value_name = "DIR", default_value = ".")]
+        dir: PathBuf,
+        /// Skip the pre-upgrade database dump.
+        #[arg(long)]
+        no_dump: bool,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -391,6 +417,7 @@ async fn dispatch(cli: Cli) -> Result<ExitCode> {
         }
         Command::Serve(args) => serve(args).await,
         Command::Db { action } => db_command(action).await,
+        Command::Update { action } => update_command(action).await,
         Command::User { action } => user_command(action).await,
         Command::Fleet { action } => fleet(action).await,
         Command::Settings { action } => settings(action).await,
@@ -956,6 +983,116 @@ fn resolve_password(password: Option<String>) -> Result<String> {
         bail!("no password given");
     }
     Ok(password)
+}
+
+/// `bail!` when the condition does not hold — anyhow has no `ensure!`.
+fn bail_if_not(cond: bool, msg: impl Into<String>) -> Result<()> {
+    if !cond {
+        bail!(msg.into());
+    }
+    Ok(())
+}
+
+/// The one-shot upgrade path for a Compose deployment. Steps are ordered so a
+/// failure leaves the old container serving: only `up -d` switches versions.
+async fn update_command(action: UpdateCommand) -> Result<ExitCode> {
+    let UpdateCommand::Now { dir, no_dump } = action;
+    let dir = dir.canonicalize().unwrap_or(dir);
+
+    println!("DonDude update — {}", dir.display());
+
+    // The compose project must be a git checkout.
+    if !dir.join(".git").exists() {
+        bail!(
+            "{} is not a git checkout; `dondude update` upgrades a compose              deployment cloned from the repository",
+            dir.display()
+        );
+    }
+
+    // Pre-upgrade database dump, exactly as the release ritual prescribes.
+    if !no_dump {
+        let dump_dir = std::env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/root"));
+        let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let target = dump_dir.join(format!("dondude-pre-upgrade-{stamp}.dump"));
+        println!("  dumping database to {}", target.display());
+        let code = dump_database(&dir, &target).await?;
+        if code != ExitCode::SUCCESS {
+            bail!("database dump failed — aborting before touching the deployment");
+        }
+    }
+
+    // Local changes: the compose file is expected to be customized (port
+    // bindings), so stash it; anything else must be resolved by the operator.
+    let stash = std::process::Command::new("git")
+        .args(["stash"])
+        .current_dir(&dir)
+        .status()?;
+    bail_if_not(stash.success(), "git stash failed");
+
+    println!("  pulling latest code");
+    let pull = std::process::Command::new("git")
+        .args(["pull", "--ff-only"])
+        .current_dir(&dir)
+        .status()?;
+    bail_if_not(
+        pull.success(),
+        "git pull --ff-only failed — resolve and retry",
+    );
+
+    let pop = std::process::Command::new("git")
+        .args(["stash", "pop"])
+        .current_dir(&dir)
+        .status()?;
+    // `pop` fails when nothing was stashed; that is fine.
+    if !pop.success() {
+        println!("  (no local changes to restore)");
+    }
+
+    println!("  rebuilding the app image");
+    let build = std::process::Command::new("docker")
+        .args(["compose", "build", "app"])
+        .current_dir(&dir)
+        .status()?;
+    bail_if_not(build.success(), "docker compose build failed");
+
+    println!("  switching to the new image");
+    let up = std::process::Command::new("docker")
+        .args(["compose", "up", "-d"])
+        .current_dir(&dir)
+        .status()?;
+    bail_if_not(up.success(), "docker compose up -d failed");
+
+    println!("Update complete. The old image can be pruned with:");
+    println!("  docker image prune -f");
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `pg_dump` the compose database service into `target`, using the same
+/// connection settings the app itself reads from the environment.
+async fn dump_database(dir: &Path, target: &Path) -> Result<ExitCode> {
+    let url = std::env::var("DATABASE_URL").context("DATABASE_URL is not set")?;
+    let status = std::process::Command::new("docker")
+        .args([
+            "compose",
+            "exec",
+            "-T",
+            "db",
+            "pg_dump",
+            "--format=custom",
+            "--file=/dev/stdout",
+        ])
+        .env("DATABASE_URL", &url)
+        .current_dir(dir)
+        .stdout(std::fs::File::create(target)?)
+        .status()?;
+    if status.success() {
+        println!("  dump written: {}", target.display());
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::FAILURE)
+    }
 }
 
 async fn db_command(action: DbCommand) -> Result<ExitCode> {
