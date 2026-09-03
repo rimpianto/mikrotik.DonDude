@@ -1071,8 +1071,12 @@ async fn update_command(action: UpdateCommand) -> Result<ExitCode> {
 
 /// `pg_dump` the compose database service into `target`, using the same
 /// connection settings the app itself reads from the environment.
+/// `pg_dump` the compose database service into `target`. Runs *inside* the
+/// db container, where `pg_dump` authenticates over the local socket as the
+/// superuser-backed role the image defines — no DATABASE_URL needed on the
+/// host, which does not (and should not) carry the deployment's credentials.
 async fn dump_database(dir: &Path, target: &Path) -> Result<ExitCode> {
-    let url = std::env::var("DATABASE_URL").context("DATABASE_URL is not set")?;
+    let user = std::env::var("POSTGRES_USER").unwrap_or_else(|_| "dondude".to_string());
     let status = std::process::Command::new("docker")
         .args([
             "compose",
@@ -1081,9 +1085,9 @@ async fn dump_database(dir: &Path, target: &Path) -> Result<ExitCode> {
             "db",
             "pg_dump",
             "--format=custom",
-            "--file=/dev/stdout",
+            &format!("--username={user}"),
+            "dondude",
         ])
-        .env("DATABASE_URL", &url)
         .current_dir(dir)
         .stdout(std::fs::File::create(target)?)
         .status()?;
