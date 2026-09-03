@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3] - 2026-09-03
+
+### Added
+- Dashboard: the header sub-line shows when the next fleet-wide monitoring
+  poll is due ("next fleet poll around 10:28:50 UTC") whenever monitoring is
+  enabled, mirroring the per-device line on the device page.
+
 ## [0.5.2] - 2026-09-03
 
 ### Fixed

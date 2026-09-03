@@ -266,6 +266,8 @@ pub fn dashboard(
     repo_path: &str,
     samples: &[Sample],
     binary_backups: &[uuid::Uuid],
+    monitor_enabled: bool,
+    monitor_interval_secs: i32,
 ) -> Markup {
     let enabled = devices.iter().filter(|device| device.enabled).count();
     let failing = devices
@@ -279,7 +281,13 @@ pub fn dashboard(
         Some(user),
         html! {
             h1 { "Dashboard" }
-            p.sub { "Backups are stored in " span.mono { (repo_path) } }
+            p.sub {
+                "Backups are stored in " span.mono { (repo_path) }
+                @if monitor_enabled {
+                    " · next fleet poll around "
+                    (next_poll_at(samples, monitor_interval_secs)) " UTC"
+                }
+            }
 
             @if devices.is_empty() {
                 div.banner.warn {

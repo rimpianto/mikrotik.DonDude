@@ -285,6 +285,8 @@ pub async fn dashboard(State(state): State<AppState>, Operator(user): Operator) 
         &state.repo_path.display().to_string(),
         &samples,
         &binary_backups,
+        settings.monitor_enabled,
+        settings.monitor_interval_secs,
     )))
 }
 
