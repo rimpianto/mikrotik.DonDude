@@ -100,6 +100,27 @@ Nothing else is needed — not `write`, not `test`.
 Set `address=` to the network DonDude runs on, so the account is useless from
 anywhere else.
 
+### Optional: an SSH key instead of the password
+
+Instead of (or alongside) the password, the `dondude-backup` account can accept
+a public key — no shared secret to rotate, and nothing to type. Generate a
+dedicated pair if you do not have one:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/dondude_ed25519 -N ""
+```
+
+Then import the public half on the router (RouterOS 7):
+
+```
+/user ssh-keys import user=dondude-backup public-key-file=dondude_ed25519.pub
+```
+
+Upload the `.pub` file first (drag it into Winbox's *Files*, or
+`scp ~/.ssh/dondude_ed25519.pub admin@192.168.1.1:`). The key works only for
+the user it was imported for; the private half never leaves the DonDude host.
+In DonDude, leave the password field empty and point the device at the key file.
+
 Check that SSH is enabled:
 
 ```
