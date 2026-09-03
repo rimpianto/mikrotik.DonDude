@@ -87,6 +87,11 @@ The interface in pictures (fresh install, no devices yet):
 | [![Devices](docs/screenshots/devices.png)](docs/screenshots/devices.png) |
 | [![Runs](docs/screenshots/runs.png)](docs/screenshots/runs.png) |
 | [![Settings](docs/screenshots/settings.png)](docs/screenshots/settings.png) |
+| [![Device](docs/screenshots/device.png)](docs/screenshots/device.png) |
+
+The last one is a device page: identity, the configuration history, and the
+Monitoring section — the CPU/memory sparkline, the sample table, and when the
+next poll is due.
 
 A **dry run** connects to every device and reports what *would* change, without
 writing, committing or pushing anything. Useful for a first look at a new fleet.
