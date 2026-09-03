@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0] - 2026-09-03
+
+### Added
+- Email notifications: after every **scheduled** run DonDude emails the
+  per-device report (outcome, detail, tally, push status) as plain text to a
+  fixed recipient. Manual and CLI runs never send mail. The SMTP relay and
+  credentials live in Settings — the password is sealed with the master key
+  like every other credential — with a "Send test email" button that saves
+  first and sends a probe, so a broken relay surfaces now, not at 03:00.
+  Port 465 (implicit TLS) via rustls, no new system dependencies.
+- Optional "only email when something failed" mode for quiet fleets.
+
 ## [0.5.4] - 2026-09-03
 
 ### Fixed
