@@ -494,6 +494,7 @@ async fn render_history(
         warning,
         &samples,
         binary_backup,
+        settings.monitor_interval_secs,
     )))
 }
 
@@ -775,6 +776,22 @@ pub async fn save_settings(
             )))
         }
     }
+}
+
+/// The favicon, baked into the binary so the container stays self-contained.
+pub async fn favicon() -> Result<Response> {
+    let mut response = (
+        axum::http::StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "image/x-icon")],
+        include_bytes!("../../static/favicon.ico").as_slice(),
+    )
+        .into_response();
+    // Favicons change rarely; let the browser keep it.
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("public, max-age=604800"),
+    );
+    Ok(response)
 }
 
 /// Serve the fleet backup as a download: the same encrypted `.dud` archive

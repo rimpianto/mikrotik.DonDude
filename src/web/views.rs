@@ -135,6 +135,7 @@ pub fn layout(title: &str, nav: Nav, operator: Option<&User>, body: Markup) -> M
         html lang="en" {
             head {
                 meta charset="utf-8";
+                link rel="icon" type="image/x-icon" href="/favicon.ico";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { "DonDude — " (title) }
                 style { (PreEscaped(STYLE)) }
@@ -571,6 +572,7 @@ pub fn device_history(
     warning: Option<&str>,
     samples: &[Sample],
     binary_backup: Option<u64>,
+    monitor_interval_secs: i32,
 ) -> Markup {
     layout(
         &device.name,
@@ -647,7 +649,8 @@ pub fn device_history(
             }
 
             h2 { "Monitoring" }
-            (monitoring_section(samples))
+            div.muted { "Next poll around " (next_poll_at(samples, monitor_interval_secs)) " UTC" }
+            (monitoring_section(samples, monitor_interval_secs))
 
             h2 { "Recent runs" }
             div.card {
@@ -1221,14 +1224,28 @@ fn binary_backup_chip(bytes: Option<u64>) -> Markup {
 
 /// The whole Monitoring section of the device page: sparkline plus the table
 /// of the most recent samples, or the empty state that points at Settings.
-fn monitoring_section(samples: &[Sample]) -> Markup {
+/// When the poller should sample this device next: newest sample plus the
+/// configured interval, formatted in UTC. "—" before the first sample.
+fn next_poll_at(samples: &[Sample], interval_secs: i32) -> String {
+    match samples.iter().max_by_key(|s| s.captured_at) {
+        Some(newest) => (newest.captured_at
+            + chrono::Duration::seconds(i64::from(interval_secs.max(10))))
+        .format("%H:%M:%S")
+        .to_string(),
+        None => "—".to_string(),
+    }
+}
+
+fn monitoring_section(samples: &[Sample], interval_secs: i32) -> Markup {
     if samples.is_empty() {
         return html! {
             div.card {
                 div.empty {
                     "No monitor samples yet. Enable Poll device state in "
                     a href="/settings" { "Settings" }
-                    "."
+                    " — the first sample arrives within "
+                    (interval_secs.max(10))
+                    " seconds of enabling."
                 }
             }
         };
@@ -1610,7 +1627,7 @@ mod tests {
 
     #[test]
     fn monitoring_section_empty_state_points_at_settings() {
-        let html = monitoring_section(&[]).into_string();
+        let html = monitoring_section(&[], 600).into_string();
         assert!(html.contains("No monitor samples yet") && html.contains("/settings"));
     }
 }

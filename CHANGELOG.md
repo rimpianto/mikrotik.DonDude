@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.1] - 2026-09-03
+
+### Added
+- Favicon: the DonDude icon served at `/favicon.ico` (baked into the binary,
+  cached for a week) and linked from every page.
+- Device page: the Monitoring header now announces when the next poll is due
+  ("Next poll around 09:19:31 UTC"), computed from the newest sample plus the
+  configured interval. The empty state says how soon the first sample arrives
+  instead of leaving a new device looking broken for up to one interval.
+
 ## [0.5.0] - 2026-09-03
 
 ### Added
