@@ -262,6 +262,36 @@ That is it. Nothing else to set up — no cron, no systemd timer.
 
 ---
 
+## The CLI on the host (for Compose deployments)
+
+Inside a Docker Compose deployment the `dondude` binary lives only in the app
+container, which is right for commands that work on the database
+(`docker compose exec app dondude db check`). But commands that manage the
+*deployment itself* — above all `update now` — need `git`, the `docker` CLI
+and the project checkout, which live on the host, not in the container.
+
+So install the release binary once on the host:
+
+```sh
+cd /tmp
+curl -sSL -o dondude.tar.gz \
+  https://github.com/rimpianto/mikrotik.DonDude/releases/download/v0.5.0/dondude-v0.5.0-x86_64-unknown-linux-gnu.tar.gz
+tar xzf dondude.tar.gz
+install -m 755 dondude-v0.5.0-x86_64-unknown-linux-gnu/dondude /usr/local/bin/dondude
+dondude --version        # sanity check
+rm -rf dondude.tar.gz dondude-v0.5.0-x86_64-unknown-linux-gnu
+```
+
+Pick the tarball matching the host architecture (aarch64 for ARM). The binary
+is self-contained; updating it is just repeating the same steps with the new
+version. With it on the host, the upgrade is:
+
+```sh
+dondude update now --dir /opt/mikrotik.DonDude
+```
+
+---
+
 ## Upgrading a deployment
 
 The upgrade ritual, in one command:

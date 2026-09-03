@@ -303,6 +303,11 @@ first failure so the running container is never left half upgraded. The manual
 steps it automates are documented in
 [GETTING-STARTED](docs/GETTING-STARTED.md#upgrading-a-deployment).
 
+In a Compose deployment the binary lives inside the app container; `update
+now` needs `git`, the `docker` CLI and the checkout, which are on the *host*.
+Install the release tarball on the host once — see
+[The CLI on the host](docs/GETTING-STARTED.md#the-cli-on-the-host-for-compose-deployments).
+
 Back up the database **before** `docker compose pull` or a rebuild, then bring
 the stack back up. See [Backup and restore](docs/MANUAL.md#backup-and-restore);
 `dondude db backup` packs the database (and `known_hosts`) into one encrypted
