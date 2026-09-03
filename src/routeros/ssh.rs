@@ -261,12 +261,12 @@ impl SshSession {
     pub fn download_file(&self, remote_path: &str) -> Result<Vec<u8>, DeviceError> {
         debug!(host = %self.target.host, remote_path, "file download");
         let sftp = self.session.sftp();
-        if let Ok(sftp) = &sftp {
-            if let Ok(mut file) = sftp.open(std::path::Path::new(remote_path)) {
-                let mut bytes = Vec::new();
-                if file.read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
-                    return Ok(bytes);
-                }
+        if let Ok(sftp) = &sftp
+            && let Ok(mut file) = sftp.open(std::path::Path::new(remote_path))
+        {
+            let mut bytes = Vec::new();
+            if file.read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
+                return Ok(bytes);
             }
         }
         // Fallback: legacy SCP protocol.

@@ -404,7 +404,6 @@ mod tests {
 
 #[cfg(test)]
 mod knot_parse_tests {
-    use super::*;
 
     #[test]
     fn parse_knot_like_output() {

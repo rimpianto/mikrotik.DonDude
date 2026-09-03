@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.4] - 2026-09-03
+
+### Fixed
+- Clippy is now clean across the whole workspace: the ignored `Result`s in
+  `update now` are propagated, the dead `volts` helper is gone, and the two
+  view functions that legitimately take one argument per rendered column
+  carry an explained `allow(too_many_arguments)`.
+
+### Docs
+- The README screenshots were recaptured from a fresh v0.5.3 install:
+  empty-state pages with placeholder data only (no real fleet names or
+  addresses), current version in the header, favicon in the tab.
+
 ## [0.5.3] - 2026-09-03
 
 ### Added

@@ -812,7 +812,7 @@ pub async fn download_backup(
         env_file: read_env_file(),
         known_hosts: read_known_hosts(),
     };
-    let bytes = input.archive_bytes(&state.db.key())?;
+    let bytes = input.archive_bytes(state.db.key())?;
 
     let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     let filename = format!("dondude-backup-{timestamp}.dud");

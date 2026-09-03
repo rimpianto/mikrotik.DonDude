@@ -1029,7 +1029,7 @@ async fn update_command(action: UpdateCommand) -> Result<ExitCode> {
         .args(["stash"])
         .current_dir(&dir)
         .status()?;
-    bail_if_not(stash.success(), "git stash failed");
+    bail_if_not(stash.success(), "git stash failed")?;
 
     println!("  pulling latest code");
     let pull = std::process::Command::new("git")
@@ -1039,7 +1039,7 @@ async fn update_command(action: UpdateCommand) -> Result<ExitCode> {
     bail_if_not(
         pull.success(),
         "git pull --ff-only failed — resolve and retry",
-    );
+    )?;
 
     let pop = std::process::Command::new("git")
         .args(["stash", "pop"])
@@ -1055,14 +1055,14 @@ async fn update_command(action: UpdateCommand) -> Result<ExitCode> {
         .args(["compose", "build", "app"])
         .current_dir(&dir)
         .status()?;
-    bail_if_not(build.success(), "docker compose build failed");
+    bail_if_not(build.success(), "docker compose build failed")?;
 
     println!("  switching to the new image");
     let up = std::process::Command::new("docker")
         .args(["compose", "up", "-d"])
         .current_dir(&dir)
         .status()?;
-    bail_if_not(up.success(), "docker compose up -d failed");
+    bail_if_not(up.success(), "docker compose up -d failed")?;
 
     println!("Update complete. The old image can be pruned with:");
     println!("  docker image prune -f");
@@ -1166,7 +1166,7 @@ async fn monitor_poll() -> Result<ExitCode> {
 /// second key to lose. Without the key the backup is unreadable — keep a
 /// copy of it somewhere safe, as the manual says.
 async fn db_backup(db: &Db, dir: &Path) -> Result<ExitCode> {
-    let key = db.key().clone();
+    let key = db.key();
 
     let sql = db.dump_sql().await?;
 
@@ -1183,7 +1183,7 @@ async fn db_backup(db: &Db, dir: &Path) -> Result<ExitCode> {
 
     let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     let path = dir.join(format!("dondude-backup-{timestamp}.dud"));
-    input.write_archive(&path, &key)?;
+    input.write_archive(&path, key)?;
 
     println!("Backup written: {}", path.display());
     println!();
@@ -1204,8 +1204,8 @@ async fn db_backup(db: &Db, dir: &Path) -> Result<ExitCode> {
 
 /// Restore a deployment from an archive. Destructive: asks first.
 async fn db_restore(db: &Db, file: &Path, yes: bool, write_env: bool) -> Result<ExitCode> {
-    let key = db.key().clone();
-    let archive = mikrotik_dondude::backup_archive::Archive::read(file, &key)?;
+    let key = db.key();
+    let archive = mikrotik_dondude::backup_archive::Archive::read(file, key)?;
 
     println!(
         "Archive created {} by DonDude {}",
@@ -1235,15 +1235,13 @@ async fn db_restore(db: &Db, file: &Path, yes: bool, write_env: bool) -> Result<
     db.restore_sql(&sql).await?;
     println!("Database restored.");
 
-    if write_env {
-        if let Some(env) = archive.file(".env") {
-            let target = PathBuf::from(".env.restored");
-            std::fs::write(&target, env)?;
-            println!(
-                ".env written to {} — review and replace your .env.",
-                target.display()
-            );
-        }
+    if write_env && let Some(env) = archive.file(".env") {
+        let target = PathBuf::from(".env.restored");
+        std::fs::write(&target, env)?;
+        println!(
+            ".env written to {} — review and replace your .env.",
+            target.display()
+        );
     }
     Ok(ExitCode::SUCCESS)
 }

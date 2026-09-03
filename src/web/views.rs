@@ -257,6 +257,7 @@ pub fn setup(error: Option<&str>) -> Markup {
 // Dashboard
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)] // one argument per rendered column
 pub fn dashboard(
     user: &User,
     devices: &[DeviceRow],
@@ -570,6 +571,7 @@ pub fn device_form(
 }
 
 /// A device's commit history, plus its recent run outcomes.
+#[allow(clippy::too_many_arguments)] // one argument per rendered column
 pub fn device_history(
     user: &User,
     device: &DeviceRow,
@@ -1474,14 +1476,6 @@ fn uptime(secs: Option<i64>) -> Markup {
             let (hours, mins) = (rem / 3_600, rem % 3_600 / 60);
             html! { (days) "d " (hours) "h " (mins) "m" }
         }
-        None => html! { span.muted { "—" } },
-    }
-}
-
-/// "24.1 V", or a dash when the board has no voltage sensor.
-fn volts(value: Option<f64>) -> Markup {
-    match value {
-        Some(value) => html! { (format!("{:.1} V", value)) },
         None => html! { span.muted { "—" } },
     }
 }
