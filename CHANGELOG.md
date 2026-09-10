@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.1] - 2026-09-10
+
+### Changed
+- The scheduled-run report email is now multipart (plain text + HTML): the
+  text part is byte-for-byte what it always was, so mailbox automation keeps
+  working; the HTML part adds a colored verdict banner (green when everything
+  committed, red when anything failed), a per-device table with outcome
+  badges, and the push status - styled like the Proxmox morning report
+  (inline CSS, blue headers, green/red statuses). The subject line is
+  unchanged. HTML values are escaped.
+
 ## [0.6.0] - 2026-09-03
 
 ### Added

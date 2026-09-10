@@ -318,7 +318,7 @@ dondude update now --dir /opt/mikrotik.DonDude
 In **Settings → Email notifications**, point DonDude at an SMTP relay (host,
 port, credentials, a From the relay accepts and a To that receives the
 reports) and press **Send test email** to prove the path works. From then on
-every *scheduled* run sends one plain-text report — one line per device, the
+every *scheduled* run sends one report (plain text + HTML) — one line per device, the
 tally, and the push status. Manual runs never mail. Tick *Only email when
 something failed* if a daily all-green mail would be noise; see
 [the manual](docs/MANUAL.md#email-notifications) for every field.
