@@ -66,45 +66,6 @@ Port 8728/8729 as a second `Transport` (already scaffolded in
 Replace password login with SRP-6a so the server never sees the operator
 password, the way the-other-dude does.
 
-## Phase 8 — Adaptive polling interval (power optimization)
-
-Let the operator set how often each device is polled instead of a fixed
-interval. Main goal: reduce power consumption on solar/battery-powered sites
-(e.g. a boat where the router is idle most of the day). Open question to
-answer before implementing: does slower polling actually save meaningful
-power? The router stays on either way; savings come mainly from fewer SSH
-sessions and less radio traffic. Measure first with a watt meter before
-investing UI complexity.
-
-- [ ] 8.1 Per-device poll interval (minutes), defaulting to the current
-      global value; `0` = use global.
-- [ ] 8.2 Activity-based auto-throttle: poll fast (e.g. 60 s) while a device
-      shows changes (traffic, CPU, config diff), back off to a slow interval
-      (e.g. 10 min) when idle.
-- [ ] 8.3 UI: per-device interval field + "idle threshold" setting, with a
-      note that this targets solar/battery deployments.
-
-## Phase 9 — Solar power monitoring
-
-Monitor the DC power feeding a device (solar panel + battery systems, e.g.
-a boat or off-grid site) and store the readings for the day.
-
-- [ ] 9.1 Solar power sampling: poll the solar charge controller / inverter
-      (SNMP, Modbus or vendor API — device-dependent, evaluation pending)
-      or read the router's own DC input voltage when the panel feeds the
-      router directly; store watts over time.
-- [ ] 9.2 `solar_samples` table (migration): captured_at, watts, battery
-      voltage, source. Same retention job as `device_samples`.
-- [ ] 9.3 Dashboard "Solar" view: watts-vs-hour-of-day graph for the current
-      day, overlays for previous days, battery voltage trend.
-- [ ] 9.4 Forecast: predicted solar production for the coming days from
-      historical production + weather forecast (sun presence). Simple model
-      first (same-weekday average + cloudiness factor from a free weather
-      API); refine only if the simple model is not good enough.
-- [ ] 9.5 Consumption-aware forecast: combine predicted production with the
-      site's consumption profile to estimate battery state of charge and
-      flag days where the site may run out of power.
-
 ## Non-goals
 
 - **NATS / Redis / message buses.** The binary is the unit of deployment.
