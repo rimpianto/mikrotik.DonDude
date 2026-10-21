@@ -313,7 +313,7 @@ fn push_field(out: &mut String, key: &str, value: Option<&str>) {
 /// Values may themselves contain `:` (build times, MAC addresses), so only the
 /// first separator counts. Keys RouterOS wraps across lines are ignored rather
 /// than mis-parsed — everything read here is optional metadata.
-fn parse_print(raw: &str) -> BTreeMap<String, String> {
+pub(crate) fn parse_print(raw: &str) -> BTreeMap<String, String> {
     let mut fields = BTreeMap::new();
     for line in normalize_newlines(raw).lines() {
         let Some((key, value)) = line.split_once(':') else {

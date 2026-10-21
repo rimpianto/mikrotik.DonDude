@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.1] - 2026-10-21
+
+### Added
+- Phase 5.2 — update checks: `dondude updates check` asks every enabled
+  device what RouterOS it runs and what its release channel (stable,
+  long-term, testing, development) offers, plus the flashed routerboard
+  firmware versus the one shipped with the installed packages. Results are
+  upserted into a new `device_updates` table (one row per device); a failed
+  check keeps the last good versions and records the error instead.
+
 ## [0.7.0] - 2026-10-21
 
 ### Added

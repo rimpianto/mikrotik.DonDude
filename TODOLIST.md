@@ -88,7 +88,7 @@ routerboard firmware step where the hardware has one.
 - [x] 5.1 Persist board identity on devices (board_name, architecture,
       ros_version, update_channel, upgrades_enabled) fed by the existing
       SystemInfo parsing; migration.
-- [ ] 5.2 Update-check runner over SSH: `/system package update print`
+- [x] 5.2 Update-check runner over SSH: `/system package update print`
       + `/system routerboard print` (CHR/x86 = no firmware), persisted to
       a `device_updates` table with per-device failure isolation.
 - [ ] 5.3 Firmware view: fleet table (versions, channel selector, badges,

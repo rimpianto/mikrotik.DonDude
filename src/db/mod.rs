@@ -123,6 +123,22 @@ pub struct DeviceRow {
     pub last_detail: Option<String>,
 }
 
+/// The last update check for one device (Phase 5). Every display field is
+/// optional: a failed check keeps the previous versions and records `last_error`.
+#[derive(Debug, Clone)]
+pub struct DeviceUpdateRow {
+    pub device_id: Uuid,
+    pub checked_at: DateTime<Utc>,
+    pub channel: Option<String>,
+    pub installed_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub status: Option<String>,
+    pub fw_current: Option<String>,
+    pub fw_upgrade: Option<String>,
+    pub firmware_supported: bool,
+    pub last_error: Option<String>,
+}
+
 impl DeviceRow {
     pub fn addr(&self) -> String {
         format!("{}:{}", self.host, self.port)
@@ -1075,6 +1091,56 @@ impl Db {
         .await?;
         Ok(())
     }
+
+    /// Upsert the outcome of a Phase 5 update check for one device.
+    ///
+    /// A successful check carries the full status; a failed check passes
+    /// `None` and only records `last_error`, keeping the last good versions —
+    /// the same rule a failed backup follows for known firmware.
+    pub async fn upsert_device_update(
+        &self,
+        device_id: Uuid,
+        status: Option<&crate::firmware::UpdateStatus>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO device_updates
+                 (id, device_id, channel, installed_version, latest_version, status,
+                  fw_current, fw_upgrade, firmware_supported, last_error)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (device_id) DO UPDATE SET
+                 checked_at = now(),
+                 channel = COALESCE(EXCLUDED.channel, device_updates.channel),
+                 installed_version = COALESCE(EXCLUDED.installed_version, device_updates.installed_version),
+                 latest_version = COALESCE(EXCLUDED.latest_version, device_updates.latest_version),
+                 status = COALESCE(EXCLUDED.status, device_updates.status),
+                 fw_current = COALESCE(EXCLUDED.fw_current, device_updates.fw_current),
+                 fw_upgrade = COALESCE(EXCLUDED.fw_upgrade, device_updates.fw_upgrade),
+                 firmware_supported = COALESCE(EXCLUDED.firmware_supported, device_updates.firmware_supported),
+                 last_error = EXCLUDED.last_error",
+        )
+        .bind(Uuid::new_v4())
+        .bind(device_id)
+        .bind(status.and_then(|s| s.channel.as_deref()))
+        .bind(status.and_then(|s| s.installed_version.as_deref()))
+        .bind(status.and_then(|s| s.latest_version.as_deref()))
+        .bind(status.and_then(|s| s.status.as_deref()))
+        .bind(status.and_then(|s| s.fw_current.as_deref()))
+        .bind(status.and_then(|s| s.fw_upgrade.as_deref()))
+        .bind(status.map(|s| s.firmware_supported))
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Latest update check per device, oldest first.
+    pub async fn device_updates(&self) -> Result<Vec<DeviceUpdateRow>> {
+        let rows = sqlx::query("SELECT * FROM device_updates ORDER BY checked_at")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(device_update_row).collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1408,6 +1474,23 @@ impl Db {
 /// show a path.
 pub fn backup_path_for(device: &DeviceRow, template: &str) -> PathBuf {
     crate::config::render_backup_path(template, &device.tenant, &device.name, &device.host)
+}
+
+fn device_update_row(row: &sqlx::postgres::PgRow) -> Result<DeviceUpdateRow> {
+    Ok(DeviceUpdateRow {
+        device_id: row.try_get("device_id")?,
+        checked_at: row.try_get("checked_at")?,
+        channel: row.try_get("channel")?,
+        installed_version: row.try_get("installed_version")?,
+        latest_version: row.try_get("latest_version")?,
+        status: row.try_get("status")?,
+        fw_current: row.try_get("fw_current")?,
+        fw_upgrade: row.try_get("fw_upgrade")?,
+        firmware_supported: row
+            .try_get::<Option<bool>, _>("firmware_supported")?
+            .unwrap_or(false),
+        last_error: row.try_get("last_error")?,
+    })
 }
 
 fn device_row(row: &sqlx::postgres::PgRow) -> Result<DeviceRow> {

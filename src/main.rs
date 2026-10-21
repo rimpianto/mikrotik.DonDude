@@ -77,6 +77,13 @@ enum Command {
         action: MonitorCommand,
     },
 
+    /// Check RouterOS and routerboard-firmware versions across the fleet.
+    #[command(subcommand_required = true, arg_required_else_help = true)]
+    Updates {
+        #[command(subcommand)]
+        action: UpdatesCommand,
+    },
+
     /// Interact with a single device.
     #[command(subcommand_required = true, arg_required_else_help = true)]
     Device {
@@ -157,6 +164,12 @@ struct ServeArgs {
 enum MonitorCommand {
     /// Sample every enabled device once and report.
     Poll,
+}
+
+#[derive(Debug, Subcommand)]
+enum UpdatesCommand {
+    /// Ask every enabled device what it runs and what its channel offers.
+    Check,
 }
 
 #[derive(Debug, Subcommand)]
@@ -427,6 +440,9 @@ async fn dispatch(cli: Cli) -> Result<ExitCode> {
         Command::Monitor {
             action: MonitorCommand::Poll,
         } => monitor_poll().await,
+        Command::Updates {
+            action: UpdatesCommand::Check,
+        } => updates_check().await,
         Command::Backup {
             action: BackupCommand::Run(args),
         } => backup_run(args).await,
@@ -1124,6 +1140,42 @@ async fn db_command(action: DbCommand) -> Result<ExitCode> {
             return Ok(code);
         }
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// One-shot update check across the fleet (Phase 5): for each device, the
+/// installed RouterOS versus what its channel offers, and the flashed
+/// routerboard firmware versus what the installed packages ship.
+async fn updates_check() -> Result<ExitCode> {
+    let db = connect().await?;
+    let config = db.runtime_config(repo_path()).await?;
+    let report = mikrotik_dondude::firmware::check_fleet(&db, &config).await;
+
+    for check in &report.checks {
+        let s = &check.status;
+        let channel = s.channel.as_deref().unwrap_or("?");
+        let ros = match (&s.installed_version, &s.latest_version) {
+            (Some(a), Some(b)) if a != b => format!("{a} -> {b} ({channel})"),
+            (Some(a), Some(_)) => format!("{a} ({channel})"),
+            (Some(a), None) => format!("{a} ({channel}, no check)"),
+            _ => "-".to_string(),
+        };
+        let fw = if !s.firmware_supported {
+            "n/a".to_string()
+        } else {
+            match (&s.fw_current, &s.fw_upgrade) {
+                (Some(a), Some(b)) if a != b => format!("{a} -> {b}"),
+                (Some(a), Some(_)) => a.clone(),
+                (Some(a), None) => format!("{a} (no upgrade firmware)"),
+                _ => "-".to_string(),
+            }
+        };
+        println!("{:<24} ros {:<32} fw {}", check.device, ros, fw);
+    }
+    for failure in &report.failures {
+        println!("{:<24} FAILED: {}", failure.device, failure.error);
+    }
+    println!("{}", report.describe());
     Ok(ExitCode::SUCCESS)
 }
 

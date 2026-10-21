@@ -499,6 +499,38 @@ async fn the_database_layer_round_trips_a_whole_deployment() {
     );
     assert_eq!(db.run(run_id).await.unwrap().status, "failed");
 
+    // --- update checks (Phase 5) --------------------------------------------
+    let status = mikrotik_dondude::firmware::UpdateStatus {
+        channel: Some("stable".to_string()),
+        installed_version: Some("7.24.4".to_string()),
+        latest_version: Some("7.25".to_string()),
+        status: Some("System is not up to date".to_string()),
+        fw_current: Some("7.24.3".to_string()),
+        fw_upgrade: Some("7.24.4".to_string()),
+        firmware_supported: true,
+    };
+    db.upsert_device_update(device_id, Some(&status), None)
+        .await
+        .unwrap();
+    let updates = db.device_updates().await.unwrap();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0].latest_version.as_deref(), Some("7.25"));
+    assert_eq!(updates[0].fw_current.as_deref(), Some("7.24.3"));
+    assert!(updates[0].firmware_supported);
+    assert!(updates[0].last_error.is_none());
+
+    // A failed check must keep the last good versions, like failed backups.
+    db.upsert_device_update(device_id, None, Some("cannot reach 10.0.0.9:22"))
+        .await
+        .unwrap();
+    let updates = db.device_updates().await.unwrap();
+    assert_eq!(updates.len(), 1, "one row per device, upserted");
+    assert_eq!(updates[0].latest_version.as_deref(), Some("7.25"));
+    assert_eq!(
+        updates[0].last_error.as_deref(),
+        Some("cannot reach 10.0.0.9:22")
+    );
+
     // --- scheduler guard ---------------------------------------------------
     let recent = chrono::Utc::now() - chrono::Duration::minutes(5);
     assert!(!db.scheduled_run_since(recent).await.unwrap());
