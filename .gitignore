@@ -5,3 +5,4 @@
 /.env
 *.dud
 .env.backup-*
+docker-compose.override.yml

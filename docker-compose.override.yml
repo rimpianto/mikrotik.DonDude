@@ -1,7 +1,0 @@
-# Local deployment override: expose the UI on the LAN (the base file binds
-# 127.0.0.1 by default). This VM is reachable only inside the management
-# network; put TLS in front before exposing it anywhere else.
-services:
-  app:
-    ports: !override
-      - "8080:8080"
