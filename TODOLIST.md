@@ -62,7 +62,49 @@ in the backup repository.
 ## Phase 5 — Firmware management
 
 Track installed vs. available RouterOS versions per device (architecture
-aware), schedule upgrades with safe-mode protection.
+aware) and orchestrate safe, operator-driven upgrades, including the
+routerboard firmware step where the hardware has one.
+
+**Decisions (2026-10-21):**
+- Channels are a per-device setting, decided by the operator in the web UI
+  (default `stable`).
+- The routerboard firmware step is NEVER automatic: the Firmware view shows
+  current vs. upgrade firmware with a dedicated per-device "Upgrade
+  firmware" button running its own mini-pipeline.
+- Per-device `upgrades_enabled` toggle: when off, the upgrade/firmware
+  buttons are not rendered and the pipeline refuses the device
+  (`outcome=upgrades-disabled`, no device contact).
+- Model guardrail: a `no_auto_reboot_models` settings list (default: the
+  CCR2004-PCIe entries) refuses upgrades for matching boards
+  (`outcome=model-guarded`) until the restart-hook slice lands.
+- Safety story: fresh config + binary backup BEFORE anything, post-restart
+  wait-up with deadline and version verification, alert email on timeout.
+  No safe mode (it reverts on disconnect — wrong tool for restarts).
+  Netinstall is LAN-only: recovery of a dead device is a hands-on, on-site
+  matter, so every upgrade stays operator-driven.
+- DonDude never downloads/stores .npk packages: the router fetches its own
+  updates (architecture aware) via `/system package update`.
+
+- [ ] 5.1 Persist board identity on devices (board_name, architecture,
+      ros_version, update_channel, upgrades_enabled) fed by the existing
+      SystemInfo parsing; migration.
+- [ ] 5.2 Update-check runner over SSH: `/system package update print`
+      + `/system routerboard print` (CHR/x86 = no firmware), persisted to
+      a `device_updates` table with per-device failure isolation.
+- [ ] 5.3 Firmware view: fleet table (versions, channel selector, badges,
+      Check now); upgrade buttons hidden for `upgrades_enabled = false`.
+- [ ] 5.4 Upgrade pipelines with guard step: RouterOS pipeline
+      (guard -> pre-flight backup -> download/install -> restart -> wait-up
+      -> verify -> report) and the separate operator-triggered firmware
+      mini-pipeline; `upgrade_runs` table; email report via notify.rs.
+- [ ] 5.5 Scheduling of update CHECKS (automatic); actual upgrades always
+      operator-clicked (auto-upgrade = later explicit opt-in).
+- [ ] 5.6 Docs: MANUAL/README/CHANGELOG for the two-firmware model, CHR
+      behavior, safety story, operator checklist.
+
+**Deferred:** per-device restart hooks for special boards (CCR2004-PCIe
+`linksafe` family) — contract sketched, blocked on the operator's script
+(interface/versioning).
 
 ## Phase 6 — RouterOS binary API transport
 

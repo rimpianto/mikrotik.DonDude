@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.2] - 2026-10-21
+
+### Docs
+- The Phase 5 roadmap (RouterOS + routerboard firmware management) is now
+  detailed in TODOLIST.md with the agreed design decisions: per-device
+  update channels and upgrades toggle, model guardrail for boards that must
+  not be restarted automatically (CCR2004-PCIe), explicit operator-triggered
+  firmware upgrades, scheduled checks with operator-driven upgrades, and a
+  backup-first safety story.
+
 ## [0.6.1] - 2026-09-10
 
 ### Changed
