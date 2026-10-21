@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use uuid::Uuid;
 
-use crate::db::{DeviceRow, EventRow, RunRow, Settings, User};
+use crate::db::{DeviceRow, DeviceUpdateRow, EventRow, RunRow, Settings, User};
 use crate::git::{DiffKind, DiffLine, HistoryEntry};
 use crate::monitor::Sample;
 use crate::web::runner::Live;
@@ -124,6 +124,7 @@ pub enum Nav {
     Dashboard,
     Devices,
     Runs,
+    Firmware,
     Settings,
     None,
 }
@@ -153,6 +154,7 @@ pub fn layout(title: &str, nav: Nav, operator: Option<&User>, body: Markup) -> M
                             a href="/" class=[on(nav == Nav::Dashboard)] { "Dashboard" }
                             a href="/devices" class=[on(nav == Nav::Devices)] { "Devices" }
                             a href="/runs" class=[on(nav == Nav::Runs)] { "Runs" }
+                            a href="/firmware" class=[on(nav == Nav::Firmware)] { "Firmware" }
                             a href="/settings" class=[on(nav == Nav::Settings)] { "Settings" }
                         }
                         div.who {
@@ -443,6 +445,150 @@ pub fn devices(user: &User, devices: &[DeviceRow], flash: Option<&str>) -> Marku
 /// operator typed while still posting to the create endpoint — deriving the
 /// action from the prefill would send them to an update of a device that does
 /// not exist.
+/// The Firmware fleet view (Phase 5): versions per device and channel.
+pub fn firmware(
+    user: &User,
+    rows: &[(DeviceRow, Option<DeviceUpdateRow>)],
+    check_running: bool,
+) -> Markup {
+    layout(
+        "Firmware",
+        Nav::Firmware,
+        Some(user),
+        html! {
+            div style="display:flex;justify-content:space-between;align-items:center" {
+                div {
+                    h1 { "Firmware" }
+                    p.sub {
+                        "RouterOS and routerboard-firmware versions, per device
+                         and release channel."
+                    }
+                }
+                form method="post" action="/firmware" {
+                    @if check_running { span.muted { "check running… " } }
+                    button.primary type="submit" { "Check all now" }
+                }
+            }
+
+            div.card {
+                @if rows.is_empty() {
+                    div.empty { "No devices yet." }
+                } @else {
+                    table {
+                        thead { tr {
+                            th { "Device" } th { "Board" } th { "Channel" }
+                            th { "RouterOS" } th { "Firmware" }
+                            th { "Last check" } th {}
+                        } }
+                        tbody { @for (device, update) in rows {
+                            tr {
+                                td {
+                                    a href={ "/devices/" (device.id) "/history" } { (device.name) }
+                                    @if !device.enabled { " " span.badge.off { "disabled" } }
+                                }
+                                td {
+                                    (device.model.as_deref().unwrap_or("—"))
+                                    " " span.muted { (device.architecture.as_deref().unwrap_or("")) }
+                                }
+                                td {
+                                    form.inline method="post"
+                                        action={ "/firmware/policy/" (device.id) } {
+                                        select name="update_channel" {
+                                            @for channel in
+                                                ["stable", "long-term", "testing", "development"] {
+                                                option value=(channel)
+                                                    selected[device.update_channel == channel] {
+                                                    (channel)
+                                                }
+                                            }
+                                        }
+                                        " "
+                                        label.check {
+                                            input type="checkbox" name="upgrades_enabled" value="1"
+                                                checked[device.upgrades_enabled];
+                                            "upgr."
+                                        }
+                                        " "
+                                        button type="submit" { "Set" }
+                                    }
+                                }
+                                td { (ros_cell(update.as_ref())) }
+                                td { (fw_cell(update.as_ref())) }
+                                td.mono { (last_check_cell(update.as_ref())) }
+                                td {
+                                    div.actions {
+                                        form.inline method="post"
+                                            action={ "/firmware/check/" (device.id) } {
+                                            button type="submit" { "Check" }
+                                        }
+                                        @if device.upgrades_enabled {
+                                            button disabled
+                                                title="Wired up in Phase 5.4" {
+                                                "Upgrade RouterOS"
+                                            }
+                                            button disabled
+                                                title="Wired up in Phase 5.4" {
+                                                "Upgrade firmware"
+                                            }
+                                        } @else {
+                                            span.badge.off title="upgrades disabled for this device" {
+                                                "upgrades off"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// RouterOS cell: installed versus what the channel offers.
+fn ros_cell(update: Option<&DeviceUpdateRow>) -> Markup {
+    let Some(u) = update else {
+        return html! { span.muted { "never checked" } };
+    };
+    match (&u.installed_version, &u.latest_version) {
+        (Some(a), Some(b)) if a != b => html! {
+            span.badge.warn { (a) " → " (b) }
+            " " span.muted { "update available" }
+        },
+        (Some(a), Some(_)) => html! { span.badge.ok { (a) } " " span.muted { "up to date" } },
+        (Some(a), None) => html! { span.muted { (a) } " " span.muted { "(no check)" } },
+        _ => html! { span.muted { "—" } },
+    }
+}
+
+/// Firmware cell: flashed versus shipped, or nothing on CHR/x86.
+fn fw_cell(update: Option<&DeviceUpdateRow>) -> Markup {
+    let Some(u) = update else {
+        return html! { span.muted { "—" } };
+    };
+    if !u.firmware_supported {
+        return html! { span.muted title="no routerboard firmware on this board" { "n/a" } };
+    }
+    match (&u.fw_current, &u.fw_upgrade) {
+        (Some(a), Some(b)) if a != b => html! { span.badge.warn { (a) " → " (b) } },
+        (Some(a), Some(_)) => html! { span.muted { (a) } },
+        _ => html! { span.muted { "—" } },
+    }
+}
+
+/// Last check cell: when, plus the error badge when the sweep failed.
+fn last_check_cell(update: Option<&DeviceUpdateRow>) -> Markup {
+    let Some(u) = update else {
+        return html! { span.muted { "—" } };
+    };
+    let when = u.checked_at.format("%m-%d %H:%M").to_string();
+    match &u.last_error {
+        Some(error) => html! { (when) " " span.badge.bad title=(error) { "err" } },
+        None => html! { (when) },
+    }
+}
+
 pub fn device_form(
     user: &User,
     values: Option<&DeviceRow>,
@@ -1682,6 +1828,53 @@ mod tests {
         assert!(none.contains("/user group set"));
         assert!(none.contains("Copy"));
         assert!(!none.contains("in Settings"));
+    }
+
+    #[test]
+    fn firmware_cells_report_update_availability() {
+        let update = crate::db::DeviceUpdateRow {
+            device_id: uuid::Uuid::nil(),
+            checked_at: chrono::Utc::now(),
+            channel: Some("stable".into()),
+            installed_version: Some("7.24.4".into()),
+            latest_version: Some("7.25".into()),
+            status: None,
+            fw_current: Some("7.24.3".into()),
+            fw_upgrade: Some("7.24.4".into()),
+            firmware_supported: true,
+            last_error: None,
+        };
+        let ros = ros_cell(Some(&update)).into_string();
+        assert!(ros.contains("7.24.4"));
+        assert!(
+            ros.contains("7.25"),
+            "the offered version must be visible: {ros}"
+        );
+        let fw = fw_cell(Some(&update)).into_string();
+        assert!(
+            fw.contains("7.24.3"),
+            "flashed firmware must be visible: {fw}"
+        );
+        assert!(fw.contains("7.24.4"));
+    }
+
+    #[test]
+    fn firmware_cells_mark_chr_boards() {
+        let update = crate::db::DeviceUpdateRow {
+            device_id: uuid::Uuid::nil(),
+            checked_at: chrono::Utc::now(),
+            channel: Some("stable".into()),
+            installed_version: Some("7.24.5".into()),
+            latest_version: Some("7.24.5".into()),
+            status: None,
+            fw_current: None,
+            fw_upgrade: None,
+            firmware_supported: false,
+            last_error: None,
+        };
+        assert!(fw_cell(Some(&update)).into_string().contains("n/a"));
+        let ros = ros_cell(Some(&update)).into_string();
+        assert!(ros.contains("up to date"));
     }
 
     #[test]

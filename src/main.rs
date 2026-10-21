@@ -710,6 +710,8 @@ async fn fleet_add(args: AddArgs) -> Result<ExitCode> {
         auth_kind,
         secret,
         private_key_path,
+        update_channel: "stable".to_string(),
+        upgrades_enabled: true,
     };
 
     match existing {

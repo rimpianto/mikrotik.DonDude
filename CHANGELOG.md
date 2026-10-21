@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.2] - 2026-10-21
+
+### Added
+- Phase 5.3 — Firmware fleet view in the web UI: per-device RouterOS
+  installed-vs-channel and routerboard firmware flashed-vs-shipped with
+  update badges, an inline per-device channel selector and upgrade
+  permission checkbox, "Check now" per device and fleet-wide (background
+  sweep), and the two upgrade buttons (visible, disabled until the Phase
+  5.4 pipelines land). Devices with upgrades disabled show a badge
+  instead of buttons. The device form gained the channel and the upgrade
+  permission too.
+
 ## [0.7.1] - 2026-10-21
 
 ### Added

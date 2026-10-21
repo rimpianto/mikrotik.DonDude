@@ -91,7 +91,7 @@ routerboard firmware step where the hardware has one.
 - [x] 5.2 Update-check runner over SSH: `/system package update print`
       + `/system routerboard print` (CHR/x86 = no firmware), persisted to
       a `device_updates` table with per-device failure isolation.
-- [ ] 5.3 Firmware view: fleet table (versions, channel selector, badges,
+- [x] 5.3 Firmware view: fleet table (versions, channel selector, badges,
       Check now); upgrade buttons hidden for `upgrades_enabled = false`.
 - [ ] 5.4 Upgrade pipelines with guard step: RouterOS pipeline
       (guard -> pre-flight backup -> download/install -> restart -> wait-up

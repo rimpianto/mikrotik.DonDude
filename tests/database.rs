@@ -44,6 +44,8 @@ fn device_input(name: &str, secret: Option<&str>) -> DeviceInput {
         auth_kind: "password".to_string(),
         secret: secret.map(str::to_string),
         private_key_path: None,
+        update_channel: "stable".to_string(),
+        upgrades_enabled: true,
     }
 }
 

@@ -307,6 +307,10 @@ pub struct DeviceForm {
     private_key_path: String,
     /// Absent when the checkbox is unticked.
     enabled: Option<String>,
+    /// RouterOS release channel (Phase 5); absent = stable.
+    update_channel: Option<String>,
+    /// Absent when the checkbox is unticked.
+    upgrades_enabled: Option<String>,
 }
 
 impl DeviceForm {
@@ -325,6 +329,11 @@ impl DeviceForm {
                 .map(str::to_string)
                 .collect(),
             enabled: self.enabled.is_some(),
+            update_channel: self
+                .update_channel
+                .clone()
+                .unwrap_or_else(|| "stable".to_string()),
+            upgrades_enabled: self.upgrades_enabled.is_some(),
             auth_kind: self.auth_kind.clone(),
             // An empty field means "keep the stored secret".
             secret: Some(self.secret.clone()).filter(|s| !s.is_empty()),
@@ -549,10 +558,8 @@ fn preview_row(form: &DeviceForm, existing: Option<&crate::db::DeviceRow>) -> cr
         model: existing.and_then(|row| row.model.clone()),
         serial: existing.and_then(|row| row.serial.clone()),
         architecture: existing.and_then(|row| row.architecture.clone()),
-        update_channel: existing
-            .map(|row| row.update_channel.clone())
-            .unwrap_or_else(|| "stable".into()),
-        upgrades_enabled: existing.is_some_and(|row| row.upgrades_enabled),
+        update_channel: input.update_channel.clone(),
+        upgrades_enabled: input.upgrades_enabled,
         last_seen_at: existing.and_then(|row| row.last_seen_at),
         last_outcome: existing.and_then(|row| row.last_outcome.clone()),
         last_detail: existing.and_then(|row| row.last_detail.clone()),
@@ -622,6 +629,97 @@ async fn start(state: &AppState, filter: DeviceFilter, dry_run: bool) -> Result 
             _ => Err(error.into()),
         },
     }
+}
+
+// ---------------------------------------------------------------------------
+// Firmware (Phase 5)
+// ---------------------------------------------------------------------------
+
+/// The Firmware fleet view: per-device RouterOS and routerboard-firmware
+/// versions against the device's channel, with per-device policy controls.
+pub async fn firmware_page(State(state): State<AppState>, Operator(user): Operator) -> Result {
+    let devices = state.db.devices().await?;
+    let updates = state.db.device_updates().await?;
+    let rows = devices
+        .into_iter()
+        .map(|device| {
+            let update = updates.iter().find(|u| u.device_id == device.id).cloned();
+            (device, update)
+        })
+        .collect::<Vec<_>>();
+    let running = state.checks.load(std::sync::atomic::Ordering::Relaxed);
+    Ok(page(views::firmware(&user, &rows, running)))
+}
+
+/// One update-check sweep across the enabled fleet, in the background.
+pub async fn firmware_check(State(state): State<AppState>, Operator(_): Operator) -> Result {
+    spawn_check(state, None);
+    Ok(Redirect::to("/firmware").into_response())
+}
+
+/// Check a single device from the Firmware view.
+pub async fn firmware_check_device(
+    State(state): State<AppState>,
+    Operator(_): Operator,
+    Path(id): Path<Uuid>,
+) -> Result {
+    // 404 early when the id is unknown.
+    state.db.device(id).await?;
+    spawn_check(state, Some(id));
+    Ok(Redirect::to("/firmware").into_response())
+}
+
+/// Per-device channel + upgrade policy from the Firmware view.
+pub async fn firmware_policy(
+    State(state): State<AppState>,
+    Operator(_): Operator,
+    Path(id): Path<Uuid>,
+    Form(form): Form<PolicyForm>,
+) -> Result {
+    let channel = form
+        .update_channel
+        .clone()
+        .unwrap_or_else(|| "stable".to_string());
+    state
+        .db
+        .set_device_policy(id, &channel, form.upgrades_enabled.is_some())
+        .await?;
+    Ok(Redirect::to("/firmware").into_response())
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct PolicyForm {
+    update_channel: Option<String>,
+    /// Absent when the checkbox is unticked.
+    upgrades_enabled: Option<String>,
+}
+
+/// Run the check in the background: the page keeps showing the previous
+/// data until the sweep lands. One sweep at a time — a second click while
+/// one runs is just a redirect.
+fn spawn_check(state: AppState, only: Option<Uuid>) {
+    if state.checks.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    tokio::spawn(async move {
+        match state.db.runtime_config(state.repo_path.clone()).await {
+            Ok(mut config) => {
+                if let Some(id) = only {
+                    config.devices.retain(|d| d.id == id);
+                    for device in &mut config.devices {
+                        device.enabled = true;
+                    }
+                }
+                crate::firmware::check_fleet(&state.db, &config).await;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "update check could not load the fleet config")
+            }
+        }
+        state
+            .checks
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    });
 }
 
 pub async fn runs(State(state): State<AppState>, Operator(user): Operator) -> Result {

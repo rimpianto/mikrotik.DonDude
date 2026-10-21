@@ -46,6 +46,9 @@ pub struct AppState {
     /// database — it is a mounted volume, not a user preference.
     pub repo_path: PathBuf,
     pub runs: Arc<RunManager>,
+    /// True while a fleet-wide update check is in flight (Phase 5), so the
+    /// Firmware view can say so and a second click is a no-op.
+    pub checks: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AppState {
@@ -73,6 +76,7 @@ impl AppState {
             db,
             repo_path,
             runs: Arc::new(RunManager::new()),
+            checks: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -136,6 +140,10 @@ pub fn router(state: AppState) -> Router {
         .route("/devices/{id}/history", get(routes::device_history))
         .route("/devices/{id}/diff/{commit}", get(routes::device_diff))
         .route("/runs", get(routes::runs).post(routes::start_run))
+        .route("/firmware", get(routes::firmware_page))
+        .route("/firmware/check", post(routes::firmware_check))
+        .route("/firmware/check/{id}", post(routes::firmware_check_device))
+        .route("/firmware/policy/{id}", post(routes::firmware_policy))
         .route("/runs/{id}", get(routes::run_detail))
         .route("/api/runs/{id}", get(routes::run_progress))
         .route(

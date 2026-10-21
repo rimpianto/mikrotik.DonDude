@@ -235,6 +235,10 @@ pub struct DeviceInput {
     pub auth_kind: String,
     pub secret: Option<String>,
     pub private_key_path: Option<String>,
+    /// RouterOS release channel this device follows (Phase 5).
+    pub update_channel: String,
+    /// Whether the upgrade buttons/pipelines may touch this device at all.
+    pub upgrades_enabled: bool,
 }
 
 impl DeviceInput {
@@ -252,6 +256,12 @@ impl DeviceInput {
         }
         if self.tenant.trim().is_empty() {
             return Err(Error::config("the device needs a tenant"));
+        }
+        if !matches!(
+            self.update_channel.as_str(),
+            "stable" | "long-term" | "testing" | "development"
+        ) {
+            return Err(Error::config("unknown update channel"));
         }
         match self.auth_kind.as_str() {
             "password" => {
@@ -954,8 +964,8 @@ impl Db {
         sqlx::query(
             "INSERT INTO devices
                  (id, tenant_id, name, host, port, username, auth_kind, secret_sealed,
-                  private_key_path, tags, enabled)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                  private_key_path, tags, enabled, update_channel, upgrades_enabled)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(id)
         .bind(tenant_id)
@@ -974,6 +984,8 @@ impl Db {
         )
         .bind(&input.tags)
         .bind(input.enabled)
+        .bind(&input.update_channel)
+        .bind(input.upgrades_enabled)
         .execute(&mut *tx)
         .await
         .map_err(|error| duplicate_name(error, &input.name))?;
@@ -1003,6 +1015,7 @@ impl Db {
             "UPDATE devices SET
                  tenant_id = $2, name = $3, host = $4, port = $5, username = $6,
                  auth_kind = $7, private_key_path = $8, tags = $9, enabled = $10,
+                 update_channel = $11, upgrades_enabled = $12,
                  updated_at = now()
              WHERE id = $1",
         )
@@ -1022,6 +1035,8 @@ impl Db {
         )
         .bind(&input.tags)
         .bind(input.enabled)
+        .bind(&input.update_channel)
+        .bind(input.upgrades_enabled)
         .execute(&mut *tx)
         .await
         .map_err(|error| duplicate_name(error, &input.name))?;
@@ -1087,6 +1102,29 @@ impl Db {
         .bind(info.model.as_deref())
         .bind(info.serial.as_deref())
         .bind(info.architecture.as_deref())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Phase 5 policy update from the Firmware view: channel + upgrade
+    /// permission in one go.
+    pub async fn set_device_policy(
+        &self,
+        id: Uuid,
+        channel: &str,
+        upgrades_enabled: bool,
+    ) -> Result<()> {
+        if !matches!(channel, "stable" | "long-term" | "testing" | "development") {
+            return Err(Error::config("unknown update channel"));
+        }
+        sqlx::query(
+            "UPDATE devices SET update_channel = $2, upgrades_enabled = $3,
+                updated_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(channel)
+        .bind(upgrades_enabled)
         .execute(&self.pool)
         .await?;
         Ok(())
