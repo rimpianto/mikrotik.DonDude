@@ -548,6 +548,11 @@ fn preview_row(form: &DeviceForm, existing: Option<&crate::db::DeviceRow>) -> cr
         firmware: existing.and_then(|row| row.firmware.clone()),
         model: existing.and_then(|row| row.model.clone()),
         serial: existing.and_then(|row| row.serial.clone()),
+        architecture: existing.and_then(|row| row.architecture.clone()),
+        update_channel: existing
+            .map(|row| row.update_channel.clone())
+            .unwrap_or_else(|| "stable".into()),
+        upgrades_enabled: existing.is_some_and(|row| row.upgrades_enabled),
         last_seen_at: existing.and_then(|row| row.last_seen_at),
         last_outcome: existing.and_then(|row| row.last_outcome.clone()),
         last_detail: existing.and_then(|row| row.last_detail.clone()),

@@ -112,6 +112,7 @@ pub struct DeviceReport {
     pub model: Option<String>,
     pub identity: Option<String>,
     pub serial: Option<String>,
+    pub architecture: Option<String>,
     pub outcome: Outcome,
     pub elapsed: Duration,
 }
@@ -296,6 +297,7 @@ where
                     model: None,
                     identity: None,
                     serial: None,
+                    architecture: None,
                     outcome: Outcome::Failed(message),
                     elapsed,
                 };
@@ -320,6 +322,7 @@ where
             model: capture.info.model.clone(),
             identity: capture.info.identity.clone(),
             serial: capture.info.serial.clone(),
+            architecture: capture.info.architecture.clone(),
             outcome,
             elapsed,
         };

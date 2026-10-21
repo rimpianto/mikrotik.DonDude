@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.0] - 2026-10-21
+
+### Added
+- Phase 5.1 — board identity and per-device upgrade policy: devices now
+  persist `architecture` (observed by probes and backup runs, like
+  model/firmware/serial) plus the operator-controlled `update_channel`
+  (default `stable`) and `upgrades_enabled` (default on) columns that the
+  upcoming firmware-management views and pipelines build on.
+
 ## [0.6.2] - 2026-10-21
 
 ### Docs

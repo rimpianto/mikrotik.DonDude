@@ -85,7 +85,7 @@ routerboard firmware step where the hardware has one.
 - DonDude never downloads/stores .npk packages: the router fetches its own
   updates (architecture aware) via `/system package update`.
 
-- [ ] 5.1 Persist board identity on devices (board_name, architecture,
+- [x] 5.1 Persist board identity on devices (board_name, architecture,
       ros_version, update_channel, upgrades_enabled) fed by the existing
       SystemInfo parsing; migration.
 - [ ] 5.2 Update-check runner over SSH: `/system package update print`

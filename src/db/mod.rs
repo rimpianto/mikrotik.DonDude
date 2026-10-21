@@ -115,6 +115,9 @@ pub struct DeviceRow {
     pub firmware: Option<String>,
     pub model: Option<String>,
     pub serial: Option<String>,
+    pub architecture: Option<String>,
+    pub update_channel: String,
+    pub upgrades_enabled: bool,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub last_outcome: Option<String>,
     pub last_detail: Option<String>,
@@ -1058,6 +1061,7 @@ impl Db {
                  firmware = COALESCE($3, firmware),
                  model    = COALESCE($4, model),
                  serial   = COALESCE($5, serial),
+                 architecture = COALESCE($6, architecture),
                  last_seen_at = now()
              WHERE id = $1",
         )
@@ -1066,6 +1070,7 @@ impl Db {
         .bind(info.version.as_deref())
         .bind(info.model.as_deref())
         .bind(info.serial.as_deref())
+        .bind(info.architecture.as_deref())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -1303,7 +1308,8 @@ impl Db {
                      identity = CASE WHEN $4 THEN COALESCE($5, identity) ELSE identity END,
                      firmware = CASE WHEN $4 THEN COALESCE($6, firmware) ELSE firmware END,
                      model    = CASE WHEN $4 THEN COALESCE($7, model)    ELSE model    END,
-                     serial   = CASE WHEN $4 THEN COALESCE($8, serial)   ELSE serial   END
+                     serial   = CASE WHEN $4 THEN COALESCE($8, serial)   ELSE serial   END,
+                     architecture = CASE WHEN $4 THEN COALESCE($9, architecture) ELSE architecture END
                  WHERE id = $1",
             )
             .bind(device.device_id)
@@ -1314,6 +1320,7 @@ impl Db {
             .bind(device.firmware.as_deref())
             .bind(device.model.as_deref())
             .bind(device.serial.as_deref())
+            .bind(device.architecture.as_deref())
             .execute(&mut *tx)
             .await?;
         }
@@ -1421,6 +1428,9 @@ fn device_row(row: &sqlx::postgres::PgRow) -> Result<DeviceRow> {
         firmware: row.try_get("firmware")?,
         model: row.try_get("model")?,
         serial: row.try_get("serial")?,
+        architecture: row.try_get("architecture")?,
+        update_channel: row.try_get("update_channel")?,
+        upgrades_enabled: row.try_get("upgrades_enabled")?,
         last_seen_at: row.try_get("last_seen_at")?,
         last_outcome: row.try_get("last_outcome")?,
         last_detail: row.try_get("last_detail")?,

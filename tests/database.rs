@@ -70,6 +70,13 @@ fn settings_input(token: Option<&str>) -> SettingsInput {
         monitor_interval_secs: 60,
         monitor_retention_days: 30,
         allow_invalid_certs: false,
+        smtp_host: None,
+        smtp_port: 465,
+        smtp_username: None,
+        smtp_password: None,
+        notify_from: None,
+        notify_to: None,
+        notify_on_failure_only: false,
     }
 }
 
@@ -363,7 +370,10 @@ async fn the_database_layer_round_trips_a_whole_deployment() {
         .unwrap();
     assert_eq!(config.devices.len(), 1);
     assert_eq!(config.general.concurrency, 4);
-    assert_eq!(config.export.command_line(), "/export terse");
+    assert_eq!(
+        config.export.command_line(),
+        "/user print detail; /user ssh-keys print; /export terse"
+    );
 
     let device = &config.devices[0];
     match &device.auth {
@@ -441,6 +451,7 @@ async fn the_database_layer_round_trips_a_whole_deployment() {
             model: Some("RB5009UG+S+".to_string()),
             identity: Some("core".to_string()),
             serial: Some("HGT08".to_string()),
+            architecture: Some("arm64".to_string()),
             outcome: Outcome::Unchanged,
             elapsed: Duration::from_millis(1200),
         }],
@@ -466,6 +477,10 @@ async fn the_database_layer_round_trips_a_whole_deployment() {
     let row = db.device(device_id).await.unwrap();
     assert_eq!(row.last_outcome.as_deref(), Some("unchanged"));
     assert_eq!(row.firmware.as_deref(), Some("7.14.3"));
+    assert_eq!(row.architecture.as_deref(), Some("arm64"));
+    // Fresh devices carry the Phase 5 defaults.
+    assert_eq!(row.update_channel, "stable");
+    assert!(row.upgrades_enabled);
     assert!(row.last_seen_at.is_some());
 
     // A failure must not blank out the last known firmware.
