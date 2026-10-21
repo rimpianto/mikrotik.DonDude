@@ -15,6 +15,14 @@ schedule. See `README.md`.
 Live CPU, memory, disk and interface traffic; Server-Sent Events to the
 browser. Alert rules on thresholds.
 
+**Status (2026-10-20):** 2.1 and 2.2 shipped — `src/monitor.rs` (poll_fleet
+with per-device backoff, columnar `/system resource print` parsing, voltage/
+temperature where present), the `monitor` background task in `serve` with the
+Settings toggles (`monitor_enabled`, `monitor_interval_secs`,
+`monitor_retention_days`), the `dondude monitor` one-shot sweep, the
+`20260902120000_monitoring.sql` migration and the `prune_samples` retention
+job running on every poll tick. Next slice: 2.3 (SSE endpoint).
+
 **Design decision (2026-09-02):** no NATS JetStream. the-other-dude needs a
 message bus because its poller is a separate process fleet feeding a separate
 API. DonDude is a single binary: the poller is a tokio task in `dondude serve`,
@@ -23,12 +31,12 @@ extra moving parts. History lives in PostgreSQL, not in the bus. If a
 distributed poller is ever needed, it can be added behind the same trait
 without touching the storage layer.
 
-- [ ] 2.1 Poller task in `serve`: sample every enabled device on an interval
+- [x] 2.1 Poller task in `serve`: sample every enabled device on an interval
       (default 60 s, configurable), over the existing SSH transport; parse
       `/system resource print` (+ uptime, voltage, temperature where present).
       Writes to Postgres and publishes to the broadcast channel. One dead
       device never stops the poller; a failure resets that device's backoff.
-- [ ] 2.2 `device_samples` table (migration): device_id, captured_at, cpu,
+- [x] 2.2 `device_samples` table (migration): device_id, captured_at, cpu,
       memory_used/total, disk_used/total, uptime, extra JSONB. Retention job
       drops rows older than a configurable window (default 30 days).
 - [ ] 2.3 SSE endpoint `/monitor/stream`: latest sample per device pushed to
